@@ -4,7 +4,6 @@ import bcrypt from 'bcryptjs'
 import { v2 as cloudinary } from 'cloudinary'
 import User from '../models/User.js'
 import { authenticateToken, requireUser } from '../middleware/auth.js'
-import { encryptText, getMaskedBankDetails } from '../utils/encryption.js'
 
 const router = express.Router()
 
@@ -65,12 +64,7 @@ router.put(
       user.profileImage = profileImageUploadUrl
       await user.save()
 
-      const safeUser = user.toObject()
-      safeUser.bankDetails = user.adminConfig?.isAdmin
-        ? getMaskedBankDetails(user.bankDetails || {})
-        : {}
-
-      res.json({ message: 'Profile updated successfully', user: safeUser })
+      res.json({ message: 'Profile updated successfully', user: user.toObject() })
     } catch (error) {
       console.error('Profile update error:', error)
       res.status(500).json({ message: 'Error updating profile' })
@@ -79,185 +73,7 @@ router.put(
 )
 
 // =====================
-// BUSINESS INFO
-// =====================
-router.put('/business-info', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const user = req.user
-    user.businessInfo = { ...user.businessInfo, ...req.body }
-    await user.save()
-    res.json({ message: 'Business information updated successfully' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating business information' })
-  }
-})
-
-// =====================
-// COMPANY LOGO UPLOAD
-// =====================
-router.post(
-  '/company-logo',
-  authenticateToken,
-  requireUser,
-  upload.single('companyLogo'),
-  async (req, res) => {
-    try {
-      const user = req.user
-
-      if (!user.adminConfig?.isAdmin) {
-        return res.status(403).json({ message: 'Admin access required' })
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ message: 'No file provided' })
-      }
-
-      // Validate file is an image
-      if (!req.file.mimetype.startsWith('image/')) {
-        return res.status(400).json({ message: 'File must be an image' })
-      }
-
-      const result = await new Promise((resolve, reject) => {
-        cloudinary.uploader
-          .upload_stream(
-            {
-              resource_type: 'image',
-              folder: 'marketbook-logos',
-              transformation: [
-                { width: 400, height: 200, crop: 'fit' },
-                { quality: 'auto' }
-              ]
-            },
-            (error, result) => (error ? reject(error) : resolve(result))
-          )
-          .end(req.file.buffer)
-      })
-
-      user.companyLogo = result.secure_url
-      await user.save()
-
-      res.json({
-        message: 'Company logo uploaded successfully',
-        companyLogo: user.companyLogo
-      })
-    } catch (error) {
-      console.error('Logo upload error:', error)
-      res.status(500).json({ message: 'Error uploading company logo' })
-    }
-  }
-)
-
-// =====================
-// DELETE COMPANY LOGO
-// =====================
-router.delete('/company-logo', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const user = req.user
-
-    if (!user.adminConfig?.isAdmin) {
-      return res.status(403).json({ message: 'Admin access required' })
-    }
-
-    user.companyLogo = null
-    await user.save()
-
-    res.json({ message: 'Company logo deleted successfully' })
-  } catch (error) {
-    console.error('Logo delete error:', error)
-    res.status(500).json({ message: 'Error deleting company logo' })
-  }
-})
-
-// =====================
-// BANK DETAILS
-// =====================
-router.put('/bank-details', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const user = req.user
-    if (!user.adminConfig?.isAdmin) {
-      return res.status(403).json({ message: 'Admin access required' })
-    }
-
-    const bankFields = Object.keys(user.bankDetails || {})
-    const updates = {}
-
-    for (const field of bankFields) {
-      if (!(field in req.body)) continue
-      const val = req.body[field]
-      if (typeof val === 'string' && val.includes('*')) continue
-      updates[field] = val ? encryptText(val) : null
-    }
-
-    user.bankDetails = { ...user.bankDetails, ...updates }
-    await user.save()
-
-    res.json({ message: 'Bank details updated successfully' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating bank details' })
-  }
-})
-
-// =====================
-// BILLING ADDRESS
-// =====================
-router.put('/billing-address', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const user = req.user
-    user.billingAddress = { ...user.billingAddress, ...req.body }
-    await user.save()
-
-    res.json({ message: 'Billing address updated successfully' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating billing address' })
-  }
-})
-
-// =====================
-// PREFERRED CURRENCY
-// =====================
-router.put('/preferred-currency', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const { preferredCurrency } = req.body
-    const user = req.user
-    user.preferredCurrency = preferredCurrency || null
-    await user.save()
-
-    res.json({
-      message: 'Preferred currency updated',
-      preferredCurrency: user.preferredCurrency
-    })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating preferred currency' })
-  }
-})
-
-// =====================
-// ADMIN DEFAULT CURRENCY
-// =====================
-router.put('/admin/default-currency', authenticateToken, requireUser, async (req, res) => {
-  try {
-    const { defaultCurrency } = req.body
-    const user = req.user
-
-    if (!user.adminConfig?.isAdmin) {
-      return res.status(403).json({ message: 'Admin access required' })
-    }
-
-    user.adminConfig.defaultCurrency =
-      defaultCurrency || user.adminConfig.defaultCurrency
-    await user.save()
-
-    res.json({
-      message: 'Admin default currency updated',
-      defaultCurrency: user.adminConfig.defaultCurrency
-    })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating admin default currency' })
-  }
-})
-
-// =====================
-// CHANGE PASSWORD (FIXED)
+// CHANGE PASSWORD
 // =====================
 router.put('/change-password', authenticateToken, requireUser, async (req, res) => {
   try {
@@ -286,6 +102,315 @@ router.put('/change-password', authenticateToken, requireUser, async (req, res) 
 })
 
 export default router
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// import express from 'express'
+// import multer from 'multer'
+// import bcrypt from 'bcryptjs'
+// import { v2 as cloudinary } from 'cloudinary'
+// import User from '../models/User.js'
+// import { authenticateToken, requireUser } from '../middleware/auth.js'
+// import { encryptText, getMaskedBankDetails } from '../utils/encryption.js'
+
+// const router = express.Router()
+
+// // ---------------------
+// // Cloudinary config
+// // ---------------------
+// cloudinary.config({
+//   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+//   api_key: process.env.CLOUDINARY_API_KEY,
+//   api_secret: process.env.CLOUDINARY_API_SECRET
+// })
+
+// // ---------------------
+// // Multer config
+// // ---------------------
+// const upload = multer({
+//   storage: multer.memoryStorage(),
+//   limits: { fileSize: 5 * 1024 * 1024 }
+// })
+
+// // =====================
+// // UPDATE PROFILE
+// // =====================
+// router.put(
+//   '/profile',
+//   authenticateToken,
+//   requireUser,
+//   upload.single('profileImage'),
+//   async (req, res) => {
+//     try {
+//       const { firstName, lastName, profileImageUrl } = req.body
+//       const user = req.user
+//       let profileImageUploadUrl = user.profileImage
+
+//       if (req.file) {
+//         const result = await new Promise((resolve, reject) => {
+//           cloudinary.uploader
+//             .upload_stream(
+//               {
+//                 resource_type: 'image',
+//                 folder: 'marketbook-profiles',
+//                 transformation: [
+//                   { width: 200, height: 200, crop: 'fill' },
+//                   { quality: 'auto' }
+//                 ]
+//               },
+//               (error, result) => (error ? reject(error) : resolve(result))
+//             )
+//             .end(req.file.buffer)
+//         })
+//         profileImageUploadUrl = result.secure_url
+//       } else if (profileImageUrl) {
+//         profileImageUploadUrl = profileImageUrl
+//       }
+
+//       user.firstName = firstName || user.firstName
+//       user.lastName = lastName || user.lastName
+//       user.profileImage = profileImageUploadUrl
+//       await user.save()
+
+//       const safeUser = user.toObject()
+//       safeUser.bankDetails = user.adminConfig?.isAdmin
+//         ? getMaskedBankDetails(user.bankDetails || {})
+//         : {}
+
+//       res.json({ message: 'Profile updated successfully', user: safeUser })
+//     } catch (error) {
+//       console.error('Profile update error:', error)
+//       res.status(500).json({ message: 'Error updating profile' })
+//     }
+//   }
+// )
+
+// // =====================
+// // BUSINESS INFO
+// // =====================
+// router.put('/business-info', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const user = req.user
+//     user.businessInfo = { ...user.businessInfo, ...req.body }
+//     await user.save()
+//     res.json({ message: 'Business information updated successfully' })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error updating business information' })
+//   }
+// })
+
+// // =====================
+// // COMPANY LOGO UPLOAD
+// // =====================
+// router.post(
+//   '/company-logo',
+//   authenticateToken,
+//   requireUser,
+//   upload.single('companyLogo'),
+//   async (req, res) => {
+//     try {
+//       const user = req.user
+
+//       if (!user.adminConfig?.isAdmin) {
+//         return res.status(403).json({ message: 'Admin access required' })
+//       }
+
+//       if (!req.file) {
+//         return res.status(400).json({ message: 'No file provided' })
+//       }
+
+//       // Validate file is an image
+//       if (!req.file.mimetype.startsWith('image/')) {
+//         return res.status(400).json({ message: 'File must be an image' })
+//       }
+
+//       const result = await new Promise((resolve, reject) => {
+//         cloudinary.uploader
+//           .upload_stream(
+//             {
+//               resource_type: 'image',
+//               folder: 'marketbook-logos',
+//               transformation: [
+//                 { width: 400, height: 200, crop: 'fit' },
+//                 { quality: 'auto' }
+//               ]
+//             },
+//             (error, result) => (error ? reject(error) : resolve(result))
+//           )
+//           .end(req.file.buffer)
+//       })
+
+//       user.companyLogo = result.secure_url
+//       await user.save()
+
+//       res.json({
+//         message: 'Company logo uploaded successfully',
+//         companyLogo: user.companyLogo
+//       })
+//     } catch (error) {
+//       console.error('Logo upload error:', error)
+//       res.status(500).json({ message: 'Error uploading company logo' })
+//     }
+//   }
+// )
+
+// // =====================
+// // DELETE COMPANY LOGO
+// // =====================
+// router.delete('/company-logo', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const user = req.user
+
+//     if (!user.adminConfig?.isAdmin) {
+//       return res.status(403).json({ message: 'Admin access required' })
+//     }
+
+//     user.companyLogo = null
+//     await user.save()
+
+//     res.json({ message: 'Company logo deleted successfully' })
+//   } catch (error) {
+//     console.error('Logo delete error:', error)
+//     res.status(500).json({ message: 'Error deleting company logo' })
+//   }
+// })
+
+// // =====================
+// // BANK DETAILS
+// // =====================
+// router.put('/bank-details', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const user = req.user
+//     if (!user.adminConfig?.isAdmin) {
+//       return res.status(403).json({ message: 'Admin access required' })
+//     }
+
+//     const bankFields = Object.keys(user.bankDetails || {})
+//     const updates = {}
+
+//     for (const field of bankFields) {
+//       if (!(field in req.body)) continue
+//       const val = req.body[field]
+//       if (typeof val === 'string' && val.includes('*')) continue
+//       updates[field] = val ? encryptText(val) : null
+//     }
+
+//     user.bankDetails = { ...user.bankDetails, ...updates }
+//     await user.save()
+
+//     res.json({ message: 'Bank details updated successfully' })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error updating bank details' })
+//   }
+// })
+
+// // =====================
+// // BILLING ADDRESS
+// // =====================
+// router.put('/billing-address', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const user = req.user
+//     user.billingAddress = { ...user.billingAddress, ...req.body }
+//     await user.save()
+
+//     res.json({ message: 'Billing address updated successfully' })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error updating billing address' })
+//   }
+// })
+
+// // =====================
+// // PREFERRED CURRENCY
+// // =====================
+// router.put('/preferred-currency', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const { preferredCurrency } = req.body
+//     const user = req.user
+//     user.preferredCurrency = preferredCurrency || null
+//     await user.save()
+
+//     res.json({
+//       message: 'Preferred currency updated',
+//       preferredCurrency: user.preferredCurrency
+//     })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error updating preferred currency' })
+//   }
+// })
+
+// // =====================
+// // ADMIN DEFAULT CURRENCY
+// // =====================
+// router.put('/admin/default-currency', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const { defaultCurrency } = req.body
+//     const user = req.user
+
+//     if (!user.adminConfig?.isAdmin) {
+//       return res.status(403).json({ message: 'Admin access required' })
+//     }
+
+//     user.adminConfig.defaultCurrency =
+//       defaultCurrency || user.adminConfig.defaultCurrency
+//     await user.save()
+
+//     res.json({
+//       message: 'Admin default currency updated',
+//       defaultCurrency: user.adminConfig.defaultCurrency
+//     })
+//   } catch (error) {
+//     res.status(500).json({ message: 'Error updating admin default currency' })
+//   }
+// })
+
+// // =====================
+// // CHANGE PASSWORD (FIXED)
+// // =====================
+// router.put('/change-password', authenticateToken, requireUser, async (req, res) => {
+//   try {
+//     const { currentPassword, newPassword } = req.body
+
+//     if (!currentPassword || !newPassword) {
+//       return res.status(400).json({ message: 'Missing required fields' })
+//     }
+
+//     const user = await User.findById(req.user._id).select('+password')
+//     if (!user) return res.status(404).json({ message: 'User not found' })
+
+//     const isMatch = await bcrypt.compare(currentPassword, user.password)
+//     if (!isMatch) {
+//       return res.status(400).json({ message: 'Current password incorrect' })
+//     }
+
+//     user.password = newPassword
+//     await user.save()
+
+//     res.json({ message: 'Password changed successfully' })
+//   } catch (error) {
+//     console.error('Change password error:', error)
+//     res.status(500).json({ message: 'Error changing password' })
+//   }
+// })
+
+// export default router
 
 
 
