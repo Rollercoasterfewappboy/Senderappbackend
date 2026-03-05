@@ -1,7 +1,6 @@
 import express from 'express'
 import Note from '../models/Note.js'
 import { authenticateToken, requireUser, requireUserAdmin } from '../middleware/auth.js'
-import { sendSharedNoteEmail } from '../utils/email.js'
 import { sendEmailWithProvider } from '../utils/emailSenders.js'
 import EmailProvider from '../models/EmailProvider.js'
 import { encryptText, decryptText } from '../utils/encryption.js'
@@ -895,9 +894,13 @@ router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
 
       const renderedSubject = `📝 ${renderedSenderName} shared a note with you: "${renderedTitle}"`
 
+      // Generate plain text version for the email
+      const bodyPlainText = `NOTE SHARED WITH YOU\n\nfrom ${renderedSenderName}\n\nHi ${placeholderMap.RECIPIENT_NAME},\n\n${renderedTitle}\n\n${renderedContent}\n\n${renderedCustomMessage ? `Message:\n${renderedCustomMessage}\n\n` : ''}${renderedCallToActionText && renderedCallLink ? `${renderedCallToActionText}\n${renderedCallLink}\n\n` : ''}Note Received\n\nYour note management platform`
+
       return {
         renderedSubject,
         renderedBody: emailHTML,
+        bodyPlainText,
         renderedSenderName,
         renderedTitle,
         renderedContent,
@@ -922,6 +925,7 @@ router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
         const {
           renderedSubject,
           renderedBody,
+          bodyPlainText,
           renderedSenderName,
           renderedTitle,
           renderedContent,
@@ -938,43 +942,48 @@ router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
         let result = await sendEmailWithProvider({
           providerDoc,
           to: [recipientEmail],
+          bcc: [],
           subject: renderedSubject,
           body: renderedBody,
+          bodyPlainText,
+          ctaText: renderedCallToActionText,
+          ctaLink: renderedCallLink,
+          replyTo: null,
           fromName: renderedSenderName,
           fromEmail: fromEmail.trim(),
-          format: 'html',
           attachments: []
         })
 
         console.log(`📬 Send Result:`, result)
 
+        // Fallback method removed - sendSharedNoteEmail is not available
         // If sendEmailWithProvider fails and provider is resend, try fallback with sendSharedNoteEmail using rendered content
-        if (!result.success && providerDoc.provider === 'resend') {
-          console.log(`⚠️  sendEmailWithProvider failed, attempting fallback with sendSharedNoteEmail...`)
-          try {
-            await sendSharedNoteEmail(
-              recipientEmail,
-              renderedSenderName,
-              renderedTitle,
-              renderedContent,
-              renderedCustomMessage || '',
-              req.user,
-              note.timezone,
-              renderedSubject,
-              note.images || [],
-              note.video || null,
-              uniqueEmails,
-              note.attachments || [],
-              fromEmail.trim(),
-              renderedCallToActionText ? renderedCallToActionText.trim() : null,
-              renderedCallLink ? renderedCallLink.trim() : null
-            )
-            result = { success: true }
-            console.log(`✅ Fallback method succeeded`)
-          } catch (fallbackError) {
-            console.error(`❌ Fallback method also failed: ${fallbackError.message}`)
-          }
-        }
+        // if (!result.success && providerDoc.provider === 'resend') {
+        //   console.log(`⚠️  sendEmailWithProvider failed, attempting fallback with sendSharedNoteEmail...`)
+        //   try {
+        //     await sendSharedNoteEmail(
+        //       recipientEmail,
+        //       renderedSenderName,
+        //       renderedTitle,
+        //       renderedContent,
+        //       renderedCustomMessage || '',
+        //       req.user,
+        //       note.timezone,
+        //       renderedSubject,
+        //       note.images || [],
+        //       note.video || null,
+        //       uniqueEmails,
+        //       note.attachments || [],
+        //       fromEmail.trim(),
+        //       renderedCallToActionText ? renderedCallToActionText.trim() : null,
+        //       renderedCallLink ? renderedCallLink.trim() : null
+        //     )
+        //     result = { success: true }
+        //     console.log(`✅ Fallback method succeeded`)
+        //   } catch (fallbackError) {
+        //     console.error(`❌ Fallback method also failed: ${fallbackError.message}`)
+        //   }
+        // }
 
         if (result.success) {
           sendResults.successCount++
