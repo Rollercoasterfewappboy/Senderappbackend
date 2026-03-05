@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import User from '../models/User.js'
 import { authenticateToken } from '../middleware/auth.js'
-import { sendConfirmationEmail, sendPasswordResetEmail } from '../utils/email.js'
+import { sendPasswordResetEmail } from '../utils/email.js'
 import { getMaskedBankDetails } from '../utils/encryption.js'
 
 const router = express.Router()
