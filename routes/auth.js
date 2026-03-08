@@ -276,7 +276,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
       isRecommended: req.user.isRecommended,
       adminConfig: {
         isAdmin: req.user.adminConfig.isAdmin,
-        defaultCurrency: req.user.adminConfig.defaultCurrency
+        defaultCurrency: req.user.adminConfig.defaultCurrency,
+        notepadEnabled: req.user.adminConfig.notepadEnabled || false
       },
       preferredCurrency: req.user.preferredCurrency,
       preferredTimezone: req.user.preferredTimezone || 'UTC',

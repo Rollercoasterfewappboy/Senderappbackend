@@ -65,7 +65,8 @@ router.post('/create-user', authenticateToken, requireGlobalAdmin, async (req, r
 // Get all users (for enabling/disabling)
 router.get('/users', authenticateToken, requireGlobalAdmin, async (req, res) => {
   try {
-    const users = await User.find({}, 'firstName lastName email isActive createdAt').sort({ createdAt: -1 })
+    // include notepadEnabled so simplified dashboard can show toggle state
+    const users = await User.find({}, 'firstName lastName email isActive createdAt adminConfig.notepadEnabled').sort({ createdAt: -1 })
     res.json({ success: true, users })
   } catch (error) {
     console.error('Error fetching users:', error)

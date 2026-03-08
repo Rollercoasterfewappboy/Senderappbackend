@@ -105,7 +105,10 @@ router.post('/create-user', authenticateToken, requireGlobalAdmin, async (req, r
 // GET /users
 router.get('/users', authenticateToken, requireGlobalAdmin, async (req, res) => {
   try {
-    const users = await User.find({ isDeleted: false }).select('firstName lastName email isActive createdAt').sort({ createdAt: -1 })
+    // include notepadEnabled so frontend can show current state
+    const users = await User.find({ isDeleted: false })
+      .select('firstName lastName email isActive createdAt adminConfig.notepadEnabled')
+      .sort({ createdAt: -1 })
     return res.json({ success: true, users })
   } catch (err) {
     console.error('fetch users error:', err)
@@ -137,6 +140,28 @@ router.put('/users/:id/enable', authenticateToken, requireGlobalAdmin, async (re
     return res.json({ success: true, message: 'User enabled', user: { id: user._id, isActive: user.isActive } })
   } catch (err) {
     console.error('enable user error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// PUT /users/:id/notepad - toggle or set notepad feature
+router.put('/users/:id/notepad', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const { enabled } = req.body
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'Enabled flag required and must be boolean' })
+    }
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) return res.status(404).json({ success: false, message: 'User not found' })
+    user.adminConfig.notepadEnabled = enabled
+    await user.save()
+    return res.json({
+      success: true,
+      message: `Notepad feature ${enabled ? 'enabled' : 'disabled'} for user`,
+      user: { id: user._id, notepadEnabled: user.adminConfig.notepadEnabled }
+    })
+  } catch (err) {
+    console.error('toggle notepad error:', err)
     return res.status(500).json({ success: false, message: err.message })
   }
 })

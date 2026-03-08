@@ -120,6 +120,11 @@ const userSchema = new mongoose.Schema({
       type: Date,
       default: null
     },
+    // Whether the global admin has enabled the Notepad feature for this user
+    notepadEnabled: {
+      type: Boolean,
+      default: false
+    },
     // Default currency for this admin (ISO 4217 code)
     defaultCurrency: {
       type: String,

@@ -90,11 +90,16 @@ function encodeBase64(s) {
 
 const router = express.Router()
 
-// Middleware to check notepad password verification
+// Middleware to check notepad password verification and feature enablement
 const requireNotepadPasswordVerified = (req, res, next) => {
-  // Skip if user is admin (has password management access)
+  // Skip checks for user-admins (they manage password) or if feature is enabled
   if (req.user?.adminConfig?.isAdmin) {
     return next()
+  }
+
+  // If notepad feature is disabled for this user, reject immediately
+  if (!req.user?.adminConfig?.notepadEnabled) {
+    return res.status(403).json({ message: 'Notepad feature is disabled for your account' })
   }
 
   // Check if user has notepad password set
@@ -612,7 +617,7 @@ router.get('/sent-reminders/list', authenticateToken, requireUser, requireNotepa
 // If note has a scheduled date, send immediately AND schedule a second send for that date
 router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
   try {
-    const { recipientEmails, customMessage, fromName, fromEmail, callToActionText, callLink } = req.body
+    const { recipientEmails, customMessage, fromName, fromEmail, callToActionText, callLink, replyTo } = req.body
     const noteId = req.params.id
 
     // ============================================================
@@ -641,6 +646,13 @@ router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(fromEmail.trim())) {
       return res.status(400).json({ message: 'Invalid from email format' })
+    }
+
+    // Validate reply-to email format if provided
+    if (replyTo && replyTo.trim()) {
+      if (!emailRegex.test(replyTo.trim())) {
+        return res.status(400).json({ message: 'Invalid reply-to email format' })
+      }
     }
 
     // Fetch the note
@@ -948,7 +960,7 @@ router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
           bodyPlainText,
           ctaText: renderedCallToActionText,
           ctaLink: renderedCallLink,
-          replyTo: null,
+          replyTo: replyTo || null,
           fromName: renderedSenderName,
           fromEmail: fromEmail.trim(),
           attachments: []

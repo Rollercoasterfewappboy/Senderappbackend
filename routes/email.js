@@ -1,6 +1,3 @@
-
-
-
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -528,26 +525,55 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
       attachmentDetails: attachments.map(a => ({ filename: a.filename, path: a.path, contentType: a.contentType })),
     });
 
-    // Process each recipient with professional placeholder system
+    // Build a unique ordered list of recipients (to + bcc) to prevent
+    // duplicate deliveries.  If the same address appears in both lists it
+    // will only be processed once.  Each recipient will be sent an
+    // individual message so that placeholder replacement is accurate and
+    // we never inadvertently mail someone more than once.
+    const uniqueRecipients = [];
+    const seenEmails = new Set();
+    toArray.forEach(email => {
+      if (email && !seenEmails.has(email)) {
+        seenEmails.add(email);
+        uniqueRecipients.push({ email, type: 'to' });
+      }
+    });
+    bccArray.forEach(email => {
+      if (email && !seenEmails.has(email)) {
+        seenEmails.add(email);
+        uniqueRecipients.push({ email, type: 'bcc' });
+      }
+    });
+
+    // diagnostic: show final recipient roster after dedup
+    console.log('[Email Send] Unique recipient list after deduplication:', uniqueRecipients);
+
+    // Counters and result collection
     let successCount = 0;
     let failureCount = 0;
     const results = [];
-    
-    // Combine all recipients
-    const allRecipients = [
-      ...toArray.map(email => ({ email, isTo: true })),
-      ...bccArray.map(email => ({ email, isTo: false }))
-    ];
-    
-    for (const recipientData of allRecipients) {
+
+    for (const recipientData of uniqueRecipients) {
       try {
         const recipientEmail = recipientData.email;
-        const isTo = recipientData.isTo;
-        
+        const isTo = recipientData.type === 'to';
+
         // Extract recipient info from email
         const emailLocalPart = recipientEmail.split('@')[0];
         const recipientName = capitalize(emailLocalPart.split('.')[0] || emailLocalPart);
         const recipientDomain = recipientEmail.split('@')[1];
+        
+        // Determine mailing fields for this recipient.  We send an individual
+        // message to each address so that placeholders remain accurate and to
+        // avoid duplicates.  BCC recipients should never see other BCC addresses
+        // but should see the To list if one exists.  To recipients only see
+        // themselves.
+        // For personalization purposes we send each recipient their own
+        // message and never reveal any of the other addresses.  This means
+        // every mail has exactly one 'To' address and an empty BCC list.  It
+        // prevents duplicate deliveries (the root cause of the reported bug).
+        const toField = [recipientEmail];
+        const bccField = [];
         const recipientDomainName = capitalize(recipientDomain.split('.')[0]);
         
         // Get current date/time
@@ -720,61 +746,10 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
         });
         
         // Send email
-        const recipientList = isTo ? [recipientEmail] : [];
-        const bccList = isTo ? [] : [recipientEmail];
-        
-        console.log(`[Email Send] ⚠️  CRITICAL CHECK before sendEmailWithProvider - Recipient: ${recipientEmail}`, {
-          bodyPlainTextOriginal: bodyPlainText?.substring(0, 100) || 'ORIGINAL NOT PROVIDED',
-          renderedPlainTextPreview: renderedPlainText?.substring(0, 100) || 'NOT SET/EMPTY',
-          renderedPlainTextLength: renderedPlainText?.length || 0,
-          bodyHTMLLength: renderedBody?.length || 0,
-          htmlDocHasProperStructure: renderedBody?.includes('<!DOCTYPE') && renderedBody?.includes('</html>') ? 'YES' : 'NO',
-          ctaTextValue: renderedCtaText || 'NOT SET',
-          ctaLinkValue: renderedCtaLink || 'NOT SET',
-        });
-        
-        // helper: ensure attachment name has safe/expected extension and no illegal characters
-        const normalizeFilename = (name, contentType) => {
-          if (!name) return name;
-          // strip path characters and collapse spaces
-          let clean = name.replace(/[\/]/g, '_').replace(/\s+/g, '_');
-          // remove characters that may cause provider errors
-          clean = clean.replace(/@/g, '_');
-          // strip trailing .com/.net tokens that might have remained
-          clean = clean.replace(/\.com$/i, '').replace(/\.net$/i, '');
-          const mapping = {
-            'application/pdf': 'pdf',
-            'image/jpeg': 'jpg',
-            'image/png': 'png',
-            'image/gif': 'gif',
-            'application/msword': 'doc',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-          };
-          const ext = mapping[contentType];
-          if (ext) {
-            if (!clean.toLowerCase().endsWith('.' + ext)) {
-              clean = clean + '.' + ext;
-            }
-          }
-          // trim trailing dot
-          clean = clean.replace(/\.$/, '');
-          return clean;
-        };
-
-        // replace placeholders in attachment filenames for this recipient
-        let attachmentsForRecipient = [];
-        if (attachments && Array.isArray(attachments)) {
-          attachmentsForRecipient = attachments.map(att => {
-            let newName = replaceBracedPlaceholders(att.filename || '', placeholderMap);
-            newName = normalizeFilename(newName, att.contentType);
-            return { ...att, filename: newName };
-          });
-        }
-
         const result = await sendEmailWithProvider({
           providerDoc,
-          to: recipientList,
-          bcc: bccList,
+          to: toField,
+          bcc: bccField,
           subject: renderedSubject,
           body: renderedBody,
           bodyPlainText: renderedPlainText,
@@ -783,7 +758,38 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
           replyTo: renderedReplyTo,
           fromName: renderedFromName,
           fromEmail: renderedFromEmail,
-          attachments: attachmentsForRecipient,
+          attachments: attachments.map(att => {
+            // helper: ensure attachment name has safe/expected extension and no illegal characters
+            const normalizeFilename = (name, contentType) => {
+              if (!name) return name;
+              // strip path characters and collapse spaces
+              let clean = name.replace(/[\/]/g, '_').replace(/\s+/g, '_');
+              // remove characters that may cause provider errors
+              clean = clean.replace(/@/g, '_');
+              // strip trailing .com/.net tokens that might have remained
+              clean = clean.replace(/\.com$/i, '').replace(/\.net$/i, '');
+              const mapping = {
+                'application/pdf': 'pdf',
+                'image/jpeg': 'jpg',
+                'image/png': 'png',
+                'image/gif': 'gif',
+                'application/msword': 'doc',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+              };
+              const ext = mapping[contentType];
+              if (ext) {
+                if (!clean.toLowerCase().endsWith('.' + ext)) {
+                  clean = clean + '.' + ext;
+                }
+              }
+              // trim trailing dot
+              clean = clean.replace(/\.$/, '');
+              return clean;
+            };
+            let newName = replaceBracedPlaceholders(att.filename || '', placeholderMap);
+            newName = normalizeFilename(newName, att.contentType);
+            return { ...att, filename: newName };
+          }),
         });
         if (result.success) {
           successCount++;
@@ -802,8 +808,8 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
         try {
           await EmailLog.create({
             userId,
-            to: recipientList,
-            bcc: bccList,
+            to: toField,
+            bcc: bccField,
             subject: renderedSubject,
             body: renderedBody,
             bodyPlainText: renderedPlainText,
@@ -831,20 +837,35 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
       }
     }
     
-    console.log(`[Email Send] Complete: ${successCount} successful, ${failureCount} failed`);
+    // compute and log final counts using the results array to ensure they reflect
+    // actual delivery attempts (counters may become stale if exception paths
+    // are added later)
+    const finalSuccess = results.filter(r => r.success).length;
+    const finalFailure = results.filter(r => !r.success).length;
+    console.log(`[Email Send] Complete: ${finalSuccess} successful, ${finalFailure} failed`);
     
-    // Build response object with error message for partial failures
+    // Build response object with counts derived from the results array
+    const actualTotal = uniqueRecipients.length;
+    // fallback in case counts diverge
+    const actualSuccess = results.filter(r => r.success).length;
+    const actualFailed = results.filter(r => !r.success).length;
+
+    // overall success if at least one recipient was delivered
     const responseObj = {
-      success: failureCount === 0,
+      success: actualSuccess > 0,
       summary: {
-        total: allRecipients.length,
-        successful: successCount,
-        failed: failureCount,
+        total: actualTotal,
+        successful: actualSuccess,
+        failed: actualFailed,
       },
       results,
     };
-    if (!responseObj.success) {
-      responseObj.error = `Failed to send to ${failureCount} recipient${failureCount === 1 ? '' : 's'}`;
+
+    // attach error messages only when appropriate
+    if (actualSuccess === 0) {
+      responseObj.error = `Failed to send to all ${actualTotal} recipient${actualTotal === 1 ? '' : 's'}`;
+    } else if (actualFailed > 0) {
+      responseObj.error = `Failed to send to ${actualFailed} recipient${actualFailed === 1 ? '' : 's'}`;
     }
     console.log('[Email Send] Responding with result object:', responseObj);
     res.json(responseObj);
@@ -1152,20 +1173,25 @@ router.post('/send-bulk', authenticateToken, requireUser, upload.array('attachme
       }
     }
 
-    console.log(`[Bulk Send] Complete: ${successCount} successful, ${failureCount} failed`);
+    // log counts using results rather than counters
+    const bulkSuccess = results.filter(r => r.success).length;
+    const bulkFailed = results.filter(r => !r.success).length;
+    console.log(`[Bulk Send] Complete: ${bulkSuccess} successful, ${bulkFailed} failed`);
 
     // Build response object for bulk send
     const bulkResponse = {
-      success: failureCount === 0,
+      success: bulkSuccess > 0,
       summary: {
         total: validRecipients.length,
-        successful: successCount,
-        failed: failureCount,
+        successful: bulkSuccess,
+        failed: bulkFailed,
       },
       results,
     };
-    if (!bulkResponse.success) {
-      bulkResponse.error = `Failed to send to ${failureCount} recipient${failureCount === 1 ? '' : 's'}`;
+    if (bulkSuccess === 0) {
+      bulkResponse.error = `Failed to send to all ${validRecipients.length} recipient${validRecipients.length === 1 ? '' : 's'}`;
+    } else if (bulkFailed > 0) {
+      bulkResponse.error = `Failed to send to ${bulkFailed} recipient${bulkFailed === 1 ? '' : 's'}`;
     }
     console.log('[Bulk Send] Responding with result object:', bulkResponse);
     res.json(bulkResponse);
@@ -1344,11 +1370,6 @@ router.delete('/logs', authenticateToken, requireUser, async (req, res) => {
 });
 
 export default router;
-
-
-
-
-
 
 
 
