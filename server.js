@@ -256,7 +256,6 @@ async function startServer() {
     console.log('Connected to MongoDB successfully');
 
     // Start the email reminder job
-    console.log('Initializing scheduled note reminder job...')
     // email reminder job removed
 
     server.listen(PORT, () => {

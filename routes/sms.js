@@ -68,7 +68,12 @@ router.post('/send', authenticateToken, requireUser, async (req, res) => {
     
     if (!result.success) return res.status(500).json({ success: false, error: result.error });
 
-    res.json({ success: true, results: result.results });
+    // Compute delivery summary
+    const total = result.results.length;
+    const successful = result.results.filter(r => r.success).length;
+    const failed = total - successful;
+
+    res.json({ success: true, results: result.results, summary: { total, successful, failed } });
   } catch (err) {
     console.error(`[SMS Send Error] ${err.message}`, err);
     res.status(500).json({ success: false, error: err.message });

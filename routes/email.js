@@ -1,3 +1,6 @@
+
+
+
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -26,6 +29,7 @@ import nodemailer from 'nodemailer';
 import { authenticateToken, requireUser } from '../middleware/auth.js';
 import EmailProvider from '../models/EmailProvider.js';
 import EmailLog from '../models/EmailLog.js';
+import SmtpLog from '../models/SmtpLog.js';
 import { sendEmailWithProvider, decodeHtmlEntities } from '../utils/emailSenders.js';
 // HTML-to-plain-text conversion is no longer performed by the backend.
 // import { htmlToPlainText } from '../utils/htmlSanitizer.js';
@@ -47,6 +51,17 @@ import cloudinary from 'cloudinary';
 import crypto from 'crypto';
 
 const router = express.Router();
+
+const DEFAULT_SMTP_CONFIG = {
+  name: '',
+  enabled: true,
+  host: '',
+  port: '',
+  username: '',
+  password: '',
+  encryption: 'ssl',
+  requireAuth: true,
+};
 
 // Configure Cloudinary from env
 cloudinary.v2.config({
@@ -261,11 +276,12 @@ router.post('/settings', authenticateToken, requireUser, async (req, res) => {
 
     console.log('[emailSettings] POST /settings called, provider=', provider);
     if (provider === 'smtp' && smtp) {
-      console.log('[emailSettings] SMTP settings provided:', {
-        host: smtp.host,
-        port: smtp.port,
-        encryption: smtp.encryption,
-        requireAuth: smtp.requireAuth,
+      const sample = Array.isArray(smtp) ? smtp[0] : smtp;
+      console.log('[emailSettings] SMTP settings provided (sample):', {
+        host: sample?.host,
+        port: sample?.port,
+        encryption: sample?.encryption,
+        requireAuth: sample?.requireAuth,
       });
     }
 
@@ -274,13 +290,31 @@ router.post('/settings', authenticateToken, requireUser, async (req, res) => {
     let doc = await EmailProvider.findOne({ userId });
     if (!doc) doc = new EmailProvider({ userId });
     doc.provider = provider;
-    // Persist smtp object but ensure requireAuth remains a boolean
-    doc.smtp = smtp && typeof smtp === 'object' ? { ...smtp } : {};
-    if (smtp && Object.prototype.hasOwnProperty.call(smtp, 'requireAuth')) {
-      // Accept boolean, numeric, or string representations from the client
-      const v = smtp.requireAuth;
-      doc.smtp.requireAuth = (v === true || v === 'true' || v === '1' || v === 1) ? true : false;
+
+    // Normalize SMTP config to array (supports legacy object format)
+    if (provider === 'smtp') {
+      if (Array.isArray(smtp)) {
+        doc.smtp = smtp.map((cfg) => ({
+          ...DEFAULT_SMTP_CONFIG,
+          ...cfg,
+          enabled: cfg.enabled !== false,
+          port: cfg.port ? String(cfg.port) : '',
+        }));
+      } else if (smtp && typeof smtp === 'object') {
+        doc.smtp = [{
+          ...DEFAULT_SMTP_CONFIG,
+          ...smtp,
+          enabled: smtp.enabled !== false,
+          port: smtp.port ? String(smtp.port) : '',
+        }];
+      } else {
+        doc.smtp = [];
+      }
+    } else {
+      // For non-SMTP providers, keep any existing SMTP configs intact in case user switches back later
+      doc.smtp = doc.smtp || [];
     }
+
     doc.aws = aws || {};
     doc.resend = resend || {};
     doc.fromEmail = fromEmail || '';
@@ -288,7 +322,38 @@ router.post('/settings', authenticateToken, requireUser, async (req, res) => {
     console.log('[emailSettings] Saving EmailProvider for user:', userId);
     await doc.save();
     console.log('[emailSettings] EmailProvider saved for user:', userId, 'provider:', doc.provider);
-    res.json({ success: true, message: 'Settings saved successfully. Use the test connection button to verify SMTP credentials.' });
+
+    // Return the updated settings so the frontend can update its state
+    const normalizeSmtpConfig = (cfg) => ({
+      name: cfg?.name || '',
+      enabled: typeof cfg?.enabled === 'boolean' ? cfg.enabled : true,
+      host: cfg?.host || '',
+      port: cfg?.port || '',
+      username: cfg?.username || '',
+      password: cfg?.password || '',
+      encryption: cfg?.encryption || 'ssl',
+      requireAuth: typeof cfg?.requireAuth === 'boolean' ? cfg.requireAuth : true,
+    });
+
+    const smtpConfigs = Array.isArray(doc.smtp)
+      ? doc.smtp.map(normalizeSmtpConfig)
+      : doc.smtp
+      ? [normalizeSmtpConfig(doc.smtp)]
+      : [];
+
+    const settings = {
+      provider: doc.provider || 'smtp',
+      smtp: smtpConfigs,
+      aws: {
+        username: doc.aws?.username || '',
+        password: doc.aws?.password || '',
+        region: doc.aws?.region || '',
+      },
+      resend: { apiKey: doc.resend?.apiKey || '' },
+      fromEmail: doc.fromEmail || '',
+    };
+
+    res.json({ success: true, message: 'Settings saved successfully. Use the test connection button to verify SMTP credentials.', settings });
   } catch (error) {
     console.error('[emailSettings] POST /settings error:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -303,21 +368,36 @@ router.get('/settings', authenticateToken, requireUser, async (req, res) => {
       res.json({ settings: null });
       return;
     }
-    // Transform nested structure to flat structure for frontend
+    // Transform nested structure for frontend (supports multiple SMTP configs)
+    const normalizeSmtpConfig = (cfg) => ({
+      name: cfg?.name || '',
+      enabled: typeof cfg?.enabled === 'boolean' ? cfg.enabled : true,
+      host: cfg?.host || '',
+      port: cfg?.port || '',
+      username: cfg?.username || '',
+      password: cfg?.password || '',
+      encryption: cfg?.encryption || 'ssl',
+      requireAuth: typeof cfg?.requireAuth === 'boolean' ? cfg.requireAuth : true,
+    });
+
+    const smtpConfigs = Array.isArray(doc.smtp)
+      ? doc.smtp.map(normalizeSmtpConfig)
+      : doc.smtp
+      ? [normalizeSmtpConfig(doc.smtp)]
+      : [];
+
     const settings = {
       provider: doc.provider || 'smtp',
-      smtpHost: doc.smtp?.host || '',
-      smtpPort: doc.smtp?.port || '',
-      smtpUser: doc.smtp?.username || '',
-      smtpPass: doc.smtp?.password || '',
-      smtpEncryption: doc.smtp?.encryption || 'ssl',
-      smtpRequireAuth: typeof doc.smtp?.requireAuth === 'boolean' ? doc.smtp.requireAuth : true,
-      awsAccessKeyId: doc.aws?.username || '',
-      awsSecretAccessKey: doc.aws?.password || '',
-      awsRegion: doc.aws?.region || '',
-      resendApiKey: doc.resend?.apiKey || '',
+      smtp: smtpConfigs,
+      aws: {
+        username: doc.aws?.username || '',
+        password: doc.aws?.password || '',
+        region: doc.aws?.region || '',
+      },
+      resend: { apiKey: doc.resend?.apiKey || '' },
       fromEmail: doc.fromEmail || '',
     };
+
     res.json({ settings });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -333,24 +413,29 @@ router.post('/settings/test', authenticateToken, requireUser, async (req, res) =
 
     console.log('[emailSettings] POST /settings/test called, provider=', provider);
     if (provider === 'smtp') {
-      if (!smtp || !smtp.host) {
+      const smtpConfigs = Array.isArray(smtp) ? smtp : smtp ? [smtp] : [];
+      const active = smtpConfigs.find((cfg) => cfg?.enabled !== false) || smtpConfigs[0];
+
+      if (!active || !active.host) {
         return res.json({ success: false, message: 'SMTP host is required' });
       }
-      console.log('[emailSettings] Testing SMTP connection to', smtp.host, 'port', smtp.port, 'encryption', smtp.encryption);
+
+      console.log('[emailSettings] Testing SMTP connection to', active.host, 'port', active.port, 'encryption', active.encryption);
 
       try {
         const transportConfig = {
-          host: smtp.host,
-          port: Number(smtp.port || 587),
+          host: active.host,
+          port: Number(active.port || 587),
           logger: false,
           connectionTimeout: 10000,
           greetingTimeout: 10000,
           socketTimeout: 10000,
         };
-        const encryption = smtp.encryption || 'ssl';
-        if (encryption === 'ssl') {
+        const encryption = active.encryption || 'ssl';
+        const port = Number(active.port || 587);
+        if (encryption === 'ssl' || port === 465) {
           transportConfig.secure = true;
-        } else if (encryption === 'tls') {
+        } else if (encryption === 'tls' || port === 587) {
           transportConfig.secure = false;
           transportConfig.requireTLS = true;
           transportConfig.tls = { rejectUnauthorized: false };
@@ -358,13 +443,25 @@ router.post('/settings/test', authenticateToken, requireUser, async (req, res) =
           transportConfig.secure = false;
         }
         // Determine whether SMTP requires authentication. Accept boolean/string/number
-        const requireAuth = !(smtp.requireAuth === false || smtp.requireAuth === 'false' || smtp.requireAuth === '0' || smtp.requireAuth === 0);
+        const requireAuth = !(active.requireAuth === false || active.requireAuth === 'false' || active.requireAuth === '0' || active.requireAuth === 0);
         if (requireAuth) {
+          const username = (active.username || '').trim();
+          const password = (active.password || '').trim();
+          if (!username || !password) {
+            return res.json({ success: false, message: 'SMTP username and password are required when authentication is enabled.' });
+          }
           transportConfig.auth = {
-            user: smtp.username,
-            pass: smtp.password,
+            user: username,
+            pass: password,
           };
+          // For authenticated SMTP, always set requireTLS unless using SSL/465
+          if (!transportConfig.secure) {
+            transportConfig.requireTLS = true;
+            if (!transportConfig.tls) transportConfig.tls = {};
+            transportConfig.tls.rejectUnauthorized = false;
+          }
         }
+        // If requireAuth is false, do NOT set transportConfig.auth (Nodemailer will connect without AUTH)
         const transporter = nodemailer.createTransport(transportConfig);
         await transporter.verify();
         console.log('[emailSettings] SMTP test successful');
@@ -819,6 +916,7 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
             replyTo,
             fromName,
             provider: providerDoc.provider,
+            smtpUsed: result.smtpUsed || null,
             status: result.success ? 'Success' : 'Failed',
             error: result.error || null,
             sentAt: new Date(),
@@ -934,9 +1032,16 @@ router.post('/send-bulk', authenticateToken, requireUser, upload.array('attachme
 
     // Validate provider configuration
     if (providerDoc.provider === 'smtp') {
-      const requireAuth = !(providerDoc.smtp?.requireAuth === false || providerDoc.smtp?.requireAuth === 'false' || providerDoc.smtp?.requireAuth === '0' || providerDoc.smtp?.requireAuth === 0);
-      if (!providerDoc.smtp?.host || (requireAuth && !providerDoc.smtp?.username)) {
-        return res.status(400).json({ success: false, error: 'SMTP provider not fully configured' });
+      const smtpConfigs = Array.isArray(providerDoc.smtp) ? providerDoc.smtp.filter(s => s.enabled) : [];
+      if (smtpConfigs.length === 0) {
+        return res.status(400).json({ success: false, error: 'No enabled SMTP configurations found' });
+      }
+      // Check each enabled config
+      for (const smtp of smtpConfigs) {
+        const requireAuth = !(smtp.requireAuth === false || smtp.requireAuth === 'false' || smtp.requireAuth === '0' || smtp.requireAuth === 0);
+        if (!smtp.host || (requireAuth && !smtp.username)) {
+          return res.status(400).json({ success: false, error: `SMTP config "${smtp.name}" not fully configured` });
+        }
       }
     }
     if (providerDoc.provider === 'aws' && (!providerDoc.aws?.username || !providerDoc.aws?.password)) {
@@ -1289,6 +1394,36 @@ router.get('/logs', authenticateToken, requireUser, async (req, res) => {
   }
 });
 
+// Get SMTP failover logs
+router.get('/smtp-logs', authenticateToken, requireUser, async (req, res) => {
+  try {
+    const logs = await SmtpLog.find({ userId: req.user._id }).sort({ createdAt: -1 }).limit(200);
+    res.json({ logs });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Clear all email logs for the user
+router.delete('/logs', authenticateToken, requireUser, async (req, res) => {
+  try {
+    await EmailLog.deleteMany({ userId: req.user._id });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Clear all SMTP failover logs for the user
+router.delete('/smtp-logs', authenticateToken, requireUser, async (req, res) => {
+  try {
+    await SmtpLog.deleteMany({ userId: req.user._id });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // =====================
 // PLACEHOLDER TESTING ENDPOINT
 // =====================
@@ -1370,6 +1505,11 @@ router.delete('/logs', authenticateToken, requireUser, async (req, res) => {
 });
 
 export default router;
+
+
+
+
+
 
 
 

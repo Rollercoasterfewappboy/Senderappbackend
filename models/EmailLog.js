@@ -13,6 +13,7 @@ const EmailLogSchema = new mongoose.Schema({
   replyTo: String,
   fromName: String,
   provider: String,
+  smtpUsed: String,
   status: { type: String, enum: ['Success', 'Failed'], default: 'Success' },
   error: String,
   sentAt: { type: Date, default: Date.now },

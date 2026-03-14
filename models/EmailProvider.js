@@ -3,14 +3,16 @@ import mongoose from 'mongoose';
 const EmailProviderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   provider: { type: String, enum: ['smtp', 'aws', 'resend'], required: true },
-  smtp: {
-    host: String,
-    port: String,
+  smtp: [{
+    name: { type: String, required: true }, // Label for the SMTP config
+    enabled: { type: Boolean, default: true },
+    host: { type: String, required: true },
+    port: { type: String, required: true },
     username: String,
     password: String,
     encryption: { type: String, enum: ['ssl', 'tls', 'none'], default: 'ssl' },
-    requireAuth: { type: Boolean, default: true }, // ✅ NEW: Support unauthenticated Port 25
-  },
+    requireAuth: { type: Boolean, default: true },
+  }],
   aws: {
     username: String,
     password: String,
