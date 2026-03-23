@@ -2,54 +2,75 @@ import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 import GlobalAdmin from '../models/GlobalAdmin.js'
 
+const normalizeIpRaw = (ip) => {
+  if (!ip) return ''
+  let value = String(ip).trim().toLowerCase()
+
+  if (value === '::1' || value === '::ffff:127.0.0.1') {
+    return '127.0.0.1'
+  }
+
+  if (value.startsWith('::ffff:')) {
+    return value.replace('::ffff:', '')
+  }
+
+  return value
+}
+
+const parseProxyIps = (req) => {
+  const forwards = []
+
+  if (req.headers['x-forwarded-for']) {
+    const headerValue = String(req.headers['x-forwarded-for'])
+    headerValue.split(',').forEach((entry) => {
+      const normalized = normalizeIpRaw(entry)
+      if (normalized) forwards.push(normalized)
+    })
+  }
+
+  if (req.headers['x-real-ip']) {
+    const normalized = normalizeIpRaw(req.headers['x-real-ip'])
+    if (normalized) forwards.push(normalized)
+  }
+
+  if (req.headers['cf-connecting-ip']) {
+    const normalized = normalizeIpRaw(req.headers['cf-connecting-ip'])
+    if (normalized) forwards.push(normalized)
+  }
+
+  if (req.ip) {
+    const normalized = normalizeIpRaw(req.ip)
+    if (normalized) forwards.push(normalized)
+  }
+
+  if (req.connection?.remoteAddress) {
+    const normalized = normalizeIpRaw(req.connection.remoteAddress)
+    if (normalized) forwards.push(normalized)
+  }
+
+  if (req.socket?.remoteAddress) {
+    const normalized = normalizeIpRaw(req.socket.remoteAddress)
+    if (normalized) forwards.push(normalized)
+  }
+
+  // Deduplicate multiple writes
+  return [...new Set(forwards)]
+}
+
 export const getRequestIp = (req) => {
   try {
-    // Try multiple sources for IP in order of preference
-    let ip = null
-
-    // Check x-forwarded-for (proxy chain, use first)
-    if (req.headers['x-forwarded-for']) {
-      ip = String(req.headers['x-forwarded-for']).split(',')[0].trim()
-    }
-    // Check x-real-ip (direct proxy)
-    else if (req.headers['x-real-ip']) {
-      ip = String(req.headers['x-real-ip']).trim()
-    }
-    // Check cf-connecting-ip (Cloudflare)
-    else if (req.headers['cf-connecting-ip']) {
-      ip = String(req.headers['cf-connecting-ip']).trim()
-    }
-    // Check connection.remoteAddress
-    else if (req.connection?.remoteAddress) {
-      ip = String(req.connection.remoteAddress).trim()
-    }
-    // Check socket.remoteAddress
-    else if (req.socket?.remoteAddress) {
-      ip = String(req.socket.remoteAddress).trim()
-    }
-    // Check req.ip
-    else if (req.ip) {
-      ip = String(req.ip).trim()
-    }
+    const ips = parseProxyIps(req)
+    const ip = ips.length ? ips[0] : null
 
     if (!ip) {
       console.warn('[getRequestIp] No IP found in any header or socket')
       return null
     }
 
-    // Normalize IPv6 localhost to 127.0.0.1
-    if (ip === '::1' || ip === '::ffff:127.0.0.1') {
-      ip = '127.0.0.1'
-    }
-    // Remove IPv6 prefix if present
-    else if (ip.startsWith('::ffff:')) {
-      ip = ip.replace('::ffff:', '')
-    }
-
     console.log('Extracted IP:', ip)
     console.log('x-forwarded-for:', req.headers['x-forwarded-for'])
     console.log('req.ip:', req.ip)
-    console.log('[getRequestIp] Extracted:', { raw: req.headers['x-forwarded-for'] || req.connection?.remoteAddress, normalized: ip })
+    console.log('[getRequestIp] Parsed IPs:', ips)
 
     return ip
   } catch (error) {
@@ -57,7 +78,6 @@ export const getRequestIp = (req) => {
     return null
   }
 }
-
 export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization']
@@ -141,23 +161,24 @@ export const requireAuthorizedIp = (req, res, next) => {
   }
 
   const requestIp = getRequestIp(req)
-  const allowedIps = (req.user.authorizedIps || []).map((item) => item.ip)
+  const requestIps = parseProxyIps(req)
+  const allowedIps = (req.user.authorizedIps || []).map((item) => normalizeIpRaw(item.ip))
 
-  if (!requestIp || allowedIps.length === 0) {
+  console.log('[requireAuthorizedIp] requestIps:', requestIps)
+  console.log('[requireAuthorizedIp] allowedIps:', allowedIps)
+
+  if (!requestIps.length || allowedIps.length === 0) {
     return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
   }
 
-  const normalizeIp = (ip) => {
-    if (!ip) return ''
-    return String(ip).trim().toLowerCase().replace(/::ffff:/i, '')
-  }
+  const hasAllowed = requestIps.some((ip) => allowedIps.includes(ip))
 
-  const normalizedRequestIp = normalizeIp(requestIp)
-  const normalizedAllowedIps = allowedIps.map(normalizeIp)
-
-  if (!normalizedAllowedIps.includes(normalizedRequestIp)) {
+  if (!hasAllowed) {
     return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
   }
+
+  // Save last request IP for visibility (optional)
+  req.user.lastRequestIp = requestIp
 
   next()
 }

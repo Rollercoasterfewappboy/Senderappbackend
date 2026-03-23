@@ -55,6 +55,16 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // limit each IP
+  // Work with Express trusted proxies safely in cloud environments.
+  // If trust proxy is enabled globally, the rate limiter requires explicit trustProxy setting.
+  trustProxy: 1,
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false,  // Disable the `X-RateLimit-*` headers
+  handler: (req, res /*, next */) => {
+    return res.status(429).json({
+      message: 'Too many requests from this IP, please try again later.'
+    })
+  }
 });
 app.use('/api/', limiter);
 
