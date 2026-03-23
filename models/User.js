@@ -163,7 +163,12 @@ const userSchema = new mongoose.Schema({
       type: Number,
       default: 0
     }
-  }
+  },
+  authorizedIps: [{
+    ip: { type: String, required: true },
+    addedBy: { type: String, default: 'global-admin' },
+    addedAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 })

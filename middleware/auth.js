@@ -2,6 +2,59 @@ import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 import GlobalAdmin from '../models/GlobalAdmin.js'
 
+export const getRequestIp = (req) => {
+  try {
+    // Try multiple sources for IP in order of preference
+    let ip = null
+
+    // Check x-forwarded-for (proxy chain, use first)
+    if (req.headers['x-forwarded-for']) {
+      ip = String(req.headers['x-forwarded-for']).split(',')[0].trim()
+    }
+    // Check x-real-ip (direct proxy)
+    else if (req.headers['x-real-ip']) {
+      ip = String(req.headers['x-real-ip']).trim()
+    }
+    // Check cf-connecting-ip (Cloudflare)
+    else if (req.headers['cf-connecting-ip']) {
+      ip = String(req.headers['cf-connecting-ip']).trim()
+    }
+    // Check connection.remoteAddress
+    else if (req.connection?.remoteAddress) {
+      ip = String(req.connection.remoteAddress).trim()
+    }
+    // Check socket.remoteAddress
+    else if (req.socket?.remoteAddress) {
+      ip = String(req.socket.remoteAddress).trim()
+    }
+    // Check req.ip
+    else if (req.ip) {
+      ip = String(req.ip).trim()
+    }
+
+    if (!ip) {
+      console.warn('[getRequestIp] No IP found in any header or socket')
+      return null
+    }
+
+    // Normalize IPv6 localhost to 127.0.0.1
+    if (ip === '::1' || ip === '::ffff:127.0.0.1') {
+      ip = '127.0.0.1'
+    }
+    // Remove IPv6 prefix if present
+    else if (ip.startsWith('::ffff:')) {
+      ip = ip.replace('::ffff:', '')
+    }
+
+    console.log('[getRequestIp] Extracted:', { raw: req.headers['x-forwarded-for'] || req.connection?.remoteAddress, normalized: ip })
+
+    return ip
+  } catch (error) {
+    console.error('[getRequestIp] Error extracting IP:', error.message)
+    return null
+  }
+}
+
 export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization']
@@ -72,6 +125,37 @@ export const requireUser = (req, res, next) => {
   if (!req.user) {
     return res.status(403).json({ message: 'User access required' })
   }
+  next()
+}
+
+export const requireAuthorizedIp = (req, res, next) => {
+  if (req.globalAdmin) {
+    return next()
+  }
+
+  if (!req.user) {
+    return res.status(403).json({ message: 'User access required' })
+  }
+
+  const requestIp = getRequestIp(req)
+  const allowedIps = (req.user.authorizedIps || []).map((item) => item.ip)
+
+  if (!requestIp || allowedIps.length === 0) {
+    return res.status(403).json({ message: 'Unauthorized IP. Access denied.' })
+  }
+
+  const normalizeIp = (ip) => {
+    if (!ip) return ''
+    return String(ip).trim().toLowerCase().replace(/::ffff:/i, '')
+  }
+
+  const normalizedRequestIp = normalizeIp(requestIp)
+  const normalizedAllowedIps = allowedIps.map(normalizeIp)
+
+  if (!normalizedAllowedIps.includes(normalizedRequestIp)) {
+    return res.status(403).json({ message: 'Unauthorized IP. Access denied.' })
+  }
+
   next()
 }
 

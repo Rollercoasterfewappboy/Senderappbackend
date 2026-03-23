@@ -105,13 +105,88 @@ router.post('/create-user', authenticateToken, requireGlobalAdmin, async (req, r
 // GET /users
 router.get('/users', authenticateToken, requireGlobalAdmin, async (req, res) => {
   try {
-    // include notepadEnabled so frontend can show current state
+    // include notepadEnabled and authorizedIps for admin IP control
     const users = await User.find({ isDeleted: false })
-      .select('firstName lastName email isActive createdAt adminConfig.notepadEnabled')
+      .select('firstName lastName email isActive createdAt adminConfig.notepadEnabled authorizedIps')
       .sort({ createdAt: -1 })
     return res.json({ success: true, users })
   } catch (err) {
     console.error('fetch users error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// GET /users/:id/authorized-ips
+router.get('/users/:id/authorized-ips', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('authorizedIps')
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+    return res.json({ success: true, authorizedIps: user.authorizedIps || [] })
+  } catch (err) {
+    console.error('get user authorized ips error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+const isValidIp = (ip) => {
+  if (!ip || typeof ip !== 'string') return false
+  const normalized = ip.trim().replace('::ffff:', '')
+  const ipv4Regex = /^(25[0-5]|2[0-4]\d|[01]?\d\d?)(\.(25[0-5]|2[0-4]\d|[01]?\d\d?)){3}$/
+  const ipv6Regex = /^[0-9a-fA-F:]+$/
+  return ipv4Regex.test(normalized) || ipv6Regex.test(normalized)
+}
+
+// POST /users/:id/authorized-ips
+router.post('/users/:id/authorized-ips', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const { ip } = req.body
+    if (!ip || !isValidIp(ip)) {
+      return res.status(400).json({ success: false, message: 'Valid IP address is required' })
+    }
+
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const normalizedIp = ip.trim().replace('::ffff:', '')
+
+    if (user.authorizedIps.some((entry) => entry.ip === normalizedIp)) {
+      return res.status(400).json({ success: false, message: 'IP already authorized' })
+    }
+
+    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin' })
+    await user.save()
+
+    return res.json({ success: true, message: 'IP authorized', authorizedIps: user.authorizedIps })
+  } catch (err) {
+    console.error('add authorized ip error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// DELETE /users/:id/authorized-ips/:ip
+router.delete('/users/:id/authorized-ips/:ip', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const targetIp = req.params.ip.trim().replace('::ffff:', '')
+    const initialLen = user.authorizedIps.length
+    user.authorizedIps = user.authorizedIps.filter((entry) => entry.ip !== targetIp)
+
+    if (user.authorizedIps.length === initialLen) {
+      return res.status(404).json({ success: false, message: 'IP not found' })
+    }
+
+    await user.save()
+    return res.json({ success: true, message: 'IP removed', authorizedIps: user.authorizedIps })
+  } catch (err) {
+    console.error('remove authorized ip error:', err)
     return res.status(500).json({ success: false, message: err.message })
   }
 })

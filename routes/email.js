@@ -26,7 +26,7 @@ import nodemailer from 'nodemailer';
  * CSS appears as visible text and buttons are malformed in inboxes.
  */
 
-import { authenticateToken, requireUser } from '../middleware/auth.js';
+import { authenticateToken, requireUser, requireAuthorizedIp } from '../middleware/auth.js';
 import EmailProvider from '../models/EmailProvider.js';
 import EmailLog from '../models/EmailLog.js';
 import SmtpLog from '../models/SmtpLog.js';
@@ -493,7 +493,7 @@ router.post('/settings/test', authenticateToken, requireUser, async (req, res) =
 // =====================
 // Uses braced placeholders like {RECIPIENT_NAME}, {RECIPIENT_EMAIL}, etc.
 // Works exactly like professional mass email senders
-router.post('/send', authenticateToken, requireUser, upload.array('attachments'), async (req, res) => {
+router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload.array('attachments'), async (req, res) => {
   try {
     const userId = req.user._id;
     const { to, bcc, subject, body, bodyPlainText, replyTo, fromName, fromEmail, bodyImage, ctaText, ctaLink, htmlAlignment, htmlMarginTop, htmlMarginBottom } = req.body;
@@ -1001,7 +1001,7 @@ router.post('/send', authenticateToken, requireUser, upload.array('attachments')
 //   "format": "html",
 //   "timezone": "UTC"
 // }
-router.post('/send-bulk', authenticateToken, requireUser, upload.array('attachments'), async (req, res) => {
+router.post('/send-bulk', authenticateToken, requireUser, requireAuthorizedIp, upload.array('attachments'), async (req, res) => {
   try {
     const userId = req.user._id;
     const { subject, body, bodyPlainText, recipients, replyTo, fromName, fromEmail, timezone = 'UTC' } = req.body;
