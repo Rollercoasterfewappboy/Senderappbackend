@@ -34,8 +34,8 @@ const io = new Server(server, {
   },
 });
 
-// ✅ Trust proxy for secure deployments
-app.set('trust proxy', 1);
+// ✅ Trust proxy for secure deployments (supports Render/Vercel and other proxies)
+app.set('trust proxy', true);
 
 // Middleware
 app.use(

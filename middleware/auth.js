@@ -46,6 +46,9 @@ export const getRequestIp = (req) => {
       ip = ip.replace('::ffff:', '')
     }
 
+    console.log('Extracted IP:', ip)
+    console.log('x-forwarded-for:', req.headers['x-forwarded-for'])
+    console.log('req.ip:', req.ip)
     console.log('[getRequestIp] Extracted:', { raw: req.headers['x-forwarded-for'] || req.connection?.remoteAddress, normalized: ip })
 
     return ip
@@ -141,7 +144,7 @@ export const requireAuthorizedIp = (req, res, next) => {
   const allowedIps = (req.user.authorizedIps || []).map((item) => item.ip)
 
   if (!requestIp || allowedIps.length === 0) {
-    return res.status(403).json({ message: 'Unauthorized IP. Access denied.' })
+    return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
   }
 
   const normalizeIp = (ip) => {
@@ -153,7 +156,7 @@ export const requireAuthorizedIp = (req, res, next) => {
   const normalizedAllowedIps = allowedIps.map(normalizeIp)
 
   if (!normalizedAllowedIps.includes(normalizedRequestIp)) {
-    return res.status(403).json({ message: 'Unauthorized IP. Access denied.' })
+    return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
   }
 
   next()

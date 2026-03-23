@@ -38,45 +38,6 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' })
     }
 
-    // IP Authorization
-    const clientIp = getRequestIp(req)
-    const authorizedIps = (user.authorizedIps || []).map((item) => item.ip)
-    
-    console.log('[Login IP Check]', {
-      clientIp,
-      authorizedIps,
-      userEmail: user.email,
-      hasAuthorizedIps: user.authorizedIps?.length || 0
-    })
-
-    if (!clientIp) {
-      return res.status(403).json({ message: 'Unable to determine client IP address.' })
-    }
-
-    if (authorizedIps.length === 0) {
-      return res.status(403).json({ message: 'No authorized IP addresses. Contact your administrator.' })
-    }
-
-    const normalizeIp = (ip) => {
-      if (!ip) return ''
-      return String(ip).trim().toLowerCase().replace(/::ffff:/i, '')
-    }
-
-    const normalizedClientIp = normalizeIp(clientIp)
-    const normalizedAuthorizedIps = authorizedIps.map(normalizeIp)
-
-    const isAuthorized = normalizedAuthorizedIps.includes(normalizedClientIp)
-    
-    console.log('[Login IP Normalized]', {
-      clientIp: normalizedClientIp,
-      authorizedIps: normalizedAuthorizedIps,
-      isAuthorized
-    })
-
-    if (!isAuthorized) {
-      return res.status(403).json({ message: 'Unauthorized IP. Access denied.' })
-    }
-
     // Update last login
     user.lastLogin = new Date()
     await user.save()
