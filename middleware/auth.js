@@ -164,6 +164,8 @@ export const requireAuthorizedIp = (req, res, next) => {
   const requestIps = parseProxyIps(req)
   const allowedIps = (req.user.authorizedIps || []).map((item) => normalizeIpRaw(item.ip))
 
+  console.log('[requireAuthorizedIp] userId:', req.user._id)
+  console.log('[requireAuthorizedIp] user.authorizedIps:', req.user.authorizedIps)
   console.log('[requireAuthorizedIp] requestIps:', requestIps)
   console.log('[requireAuthorizedIp] allowedIps:', allowedIps)
 

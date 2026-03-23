@@ -138,6 +138,44 @@ const isValidIp = (ip) => {
   return ipv4Regex.test(normalized) || ipv6Regex.test(normalized)
 }
 
+// TEMPORARY: Auto-add current request IP to user (for testing IP detection)
+// POST /users/:id/auto-add-current-ip
+router.post('/users/:id/auto-add-current-ip', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    // Get current request IP
+    const { getRequestIp } = await import('../middleware/auth.js')
+    const currentIp = getRequestIp(req)
+
+    if (!currentIp) {
+      return res.status(400).json({ success: false, message: 'Could not determine current IP' })
+    }
+
+    // Check if IP already exists
+    const normalizedIp = currentIp.trim().replace('::ffff:', '')
+    if (user.authorizedIps.some((entry) => entry.ip === normalizedIp)) {
+      return res.status(400).json({ success: false, message: 'IP already authorized' })
+    }
+
+    // Add the IP
+    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin' })
+    await user.save()
+
+    return res.json({
+      success: true,
+      message: `Auto-added current IP: ${normalizedIp}`,
+      authorizedIps: user.authorizedIps
+    })
+  } catch (err) {
+    console.error('auto-add current ip error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
 // POST /users/:id/authorized-ips
 router.post('/users/:id/authorized-ips', authenticateToken, requireGlobalAdmin, async (req, res) => {
   try {
