@@ -7,24 +7,37 @@ function normalizePhone(phone, defaultCountry) {
   let p = String(phone).trim();
   p = p.replace(/[\s\-()]/g, '');
   if (!p.startsWith('+')) {
-    // If starts with 00 convert to +
     if (p.startsWith('00')) p = '+' + p.slice(2);
     else p = (defaultCountry || '+1') + p.replace(/^\+/, '');
   }
   return p;
 }
 
-export async function sendSmsWithProvider({ providerDoc, to, message, userId }) {
-  // to: array of normalized phone numbers
+export async function sendSmsWithProvider({ providerDoc, to, message, userId, onProgress }) {
   try {
     if (!providerDoc || !providerDoc.enabled) throw new Error('No SMS provider configured');
     const provider = providerDoc.provider;
     if (!Array.isArray(to)) to = [to];
 
     const results = [];
-    for (const recipient of to) {
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (let index = 0; index < to.length; index += 1) {
+      const recipient = to[index];
       const log = new SmsLog({ userId, sender: providerDoc.senderValue || '', recipient, message, provider: providerDoc.provider, status: 'Pending' });
       await log.save();
+
+      let progressResult = {
+        recipient,
+        success: false,
+        error: null,
+        providerMessageId: null,
+        index: index + 1,
+        sent: sentCount,
+        failed: failedCount,
+        pending: to.length - (sentCount + failedCount),
+      };
 
       try {
         if (provider === 'twilio') {
@@ -32,7 +45,6 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId }) 
           if (!accountSid || !authToken) throw new Error('Twilio credentials missing');
           const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
           const params = new URLSearchParams();
-          // Use senderValue if alphanumeric type, otherwise use phone number from credentials
           const fromValue = providerDoc.senderType === 'alphanumeric' ? providerDoc.senderValue : (from || providerDoc.senderValue || '');
           params.append('From', fromValue);
           params.append('To', recipient);
@@ -49,15 +61,35 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId }) 
           log.providerMessageId = res.data.sid;
           log.meta = res.data;
           await log.save();
+          sentCount += 1;
+          progressResult = {
+            recipient,
+            success: true,
+            error: null,
+            providerMessageId: res.data.sid,
+            index: index + 1,
+            sent: sentCount,
+            failed: failedCount,
+            pending: to.length - (sentCount + failedCount),
+          };
           results.push({ recipient, success: true, id: res.data.sid });
         } else if (provider === 'mock' || !provider) {
-          // Mock provider for development
           log.status = 'Sent';
           log.providerMessageId = `mock-${Date.now()}`;
           await log.save();
+          sentCount += 1;
+          progressResult = {
+            recipient,
+            success: true,
+            error: null,
+            providerMessageId: log.providerMessageId,
+            index: index + 1,
+            sent: sentCount,
+            failed: failedCount,
+            pending: to.length - (sentCount + failedCount),
+          };
           results.push({ recipient, success: true, id: log.providerMessageId });
         } else {
-          // Generic HTTP POST: custom provider must provide a sendUrl and method in credentials
           const { sendUrl, apiKey, method = 'POST', bodyField = 'body', toField = 'to', fromField = 'from' } = providerDoc.credentials || {};
           if (!sendUrl) throw new Error('Custom provider not configured');
           const payload = {};
@@ -69,12 +101,21 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId }) 
           log.providerMessageId = res.data?.messageId || res.data?.id || `custom-${Date.now()}`;
           log.meta = res.data;
           await log.save();
+          sentCount += 1;
+          progressResult = {
+            recipient,
+            success: true,
+            error: null,
+            providerMessageId: log.providerMessageId,
+            index: index + 1,
+            sent: sentCount,
+            failed: failedCount,
+            pending: to.length - (sentCount + failedCount),
+          };
           results.push({ recipient, success: true, id: log.providerMessageId });
         }
       } catch (err) {
         log.status = 'Failed';
-        
-        // Better error logging: capture Twilio API error response if available
         let errorDetail = err.message;
         if (err.response?.data) {
           const errorData = err.response.data;
@@ -83,11 +124,26 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId }) 
         } else {
           console.error(`[SMS Error] ${errorDetail}`);
         }
-        
+
         log.error = errorDetail;
         log.attempts = (log.attempts || 0) + 1;
         await log.save();
+        failedCount += 1;
+        progressResult = {
+          recipient,
+          success: false,
+          error: errorDetail,
+          providerMessageId: null,
+          index: index + 1,
+          sent: sentCount,
+          failed: failedCount,
+          pending: to.length - (sentCount + failedCount),
+        };
         results.push({ recipient, success: false, error: errorDetail });
+      }
+
+      if (typeof onProgress === 'function') {
+        onProgress(progressResult);
       }
     }
 

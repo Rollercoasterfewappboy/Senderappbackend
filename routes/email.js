@@ -63,6 +63,23 @@ const DEFAULT_SMTP_CONFIG = {
   requireAuth: true,
 };
 
+function getIoFromReq(req) {
+  return req.app && typeof req.app.get === 'function' ? req.app.get('io') : null;
+}
+
+function createSendSessionId(reqBodySessionId) {
+  if (reqBodySessionId) return reqBodySessionId;
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `send-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+}
+
+function emitEmailProgress(io, userId, payload) {
+  if (!io || !userId) return;
+  io.to(String(userId)).emit('email-send-progress', payload);
+}
+
 // Configure Cloudinary from env
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -645,6 +662,31 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     // diagnostic: show final recipient roster after dedup
     console.log('[Email Send] Unique recipient list after deduplication:', uniqueRecipients);
 
+    const sendSessionId = createSendSessionId(req.body.sendSessionId);
+    const io = getIoFromReq(req);
+    const totalRecipients = uniqueRecipients.length;
+
+    const emitProgressUpdate = (partial = {}) => {
+      emitEmailProgress(io, userId, {
+        sessionId: sendSessionId,
+        total: totalRecipients,
+        successful: successCount,
+        failed: failureCount,
+        pending: Math.max(0, totalRecipients - (successCount + failureCount)),
+        timestamp: new Date().toISOString(),
+        status: 'in-progress',
+        ...partial,
+      });
+    };
+
+    // Initial progress event
+    emitProgressUpdate({
+      status: 'started',
+      lastEmail: null,
+      lastResult: null,
+      lastError: null,
+    });
+
     // Counters and result collection
     let successCount = 0;
     let failureCount = 0;
@@ -843,6 +885,25 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
         });
         
         // Send email
+        const pendingLog = await EmailLog.create({
+          userId,
+          to: toField,
+          bcc: bccField,
+          subject: renderedSubject,
+          body: renderedBody,
+          bodyPlainText: renderedPlainText,
+          ctaText: renderedCtaText,
+          ctaLink: renderedCtaLink,
+          attachments: attachments.map(a => a.path),
+          replyTo,
+          fromName,
+          provider: providerDoc.provider,
+          smtpUsed: null,
+          status: 'Pending',
+          error: null,
+          sentAt: new Date(),
+        });
+
         const result = await sendEmailWithProvider({
           providerDoc,
           to: toField,
@@ -894,42 +955,47 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
           failureCount++;
           console.error('[Email Send] Provider reported failure for', recipientEmail, 'error:', result.error);
         }
-        
+
         results.push({
           email: recipientEmail,
           success: result.success,
           error: result.error || null,
         });
-        
-        // Log email
+
         try {
-          await EmailLog.create({
-            userId,
-            to: toField,
-            bcc: bccField,
-            subject: renderedSubject,
-            body: renderedBody,
-            bodyPlainText: renderedPlainText,
-            ctaText: renderedCtaText,
-            ctaLink: renderedCtaLink,
-            attachments: attachments.map(a => a.path),
-            replyTo,
-            fromName,
-            provider: providerDoc.provider,
-            smtpUsed: result.smtpUsed || null,
-            status: result.success ? 'Success' : 'Failed',
-            error: result.error || null,
-            sentAt: new Date(),
-          });
+          pendingLog.status = result.success ? 'Success' : 'Failed';
+          pendingLog.smtpUsed = result.smtpUsed || null;
+          pendingLog.error = result.error || null;
+          await pendingLog.save();
         } catch (logError) {
-          console.error('Failed to log email:', logError);
+          console.error('Failed to update email log:', logError);
         }
+
+        emitProgressUpdate({
+          lastEmail: recipientEmail,
+          lastResult: result.success ? 'sent' : 'failed',
+          lastError: result.error || null,
+        });
       } catch (error) {
         failureCount++;
         results.push({
           email: recipientData.email,
           success: false,
           error: error.message,
+        });
+        if (typeof pendingLog !== 'undefined' && pendingLog) {
+          try {
+            pendingLog.status = 'Failed';
+            pendingLog.error = error.message;
+            await pendingLog.save();
+          } catch (logError) {
+            console.error('Failed to update pending email log after exception:', logError);
+          }
+        }
+        emitProgressUpdate({
+          lastEmail: recipientData.email,
+          lastResult: 'failed',
+          lastError: error.message,
         });
         console.error(`Error sending to ${recipientData.email}:`, error.message);
       }
@@ -947,6 +1013,20 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     // fallback in case counts diverge
     const actualSuccess = results.filter(r => r.success).length;
     const actualFailed = results.filter(r => !r.success).length;
+
+    // final progress event
+    emitEmailProgress(io, userId, {
+      sessionId: sendSessionId,
+      total: actualTotal,
+      successful: actualSuccess,
+      failed: actualFailed,
+      pending: 0,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      lastEmail: results.length > 0 ? results[results.length - 1].email : null,
+      lastResult: results.length > 0 ? (results[results.length - 1].success ? 'sent' : 'failed') : null,
+      lastError: results.length > 0 ? results[results.length - 1].error : null,
+    });
 
     // overall success if at least one recipient was delivered
     const responseObj = {
@@ -1387,8 +1467,60 @@ router.post('/preview-template', authenticateToken, requireUser, (req, res) => {
 // Get email logs
 router.get('/logs', authenticateToken, requireUser, async (req, res) => {
   try {
-    const logs = await EmailLog.find({ userId: req.user._id }).sort({ sentAt: -1 }).limit(100);
-    res.json({ logs });
+    const userId = req.user._id;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const statusRaw = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
+    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+
+    const filter = { userId };
+
+    if (statusRaw && statusRaw !== 'All') {
+      const statusList = statusRaw.split(',').map((item) => item.trim()).filter(Boolean);
+      if (statusList.length > 0) {
+        filter.status = { $in: statusList };
+      }
+    }
+
+    if (searchRaw) {
+      const escaped = searchRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      filter.$or = [
+        { subject: regex },
+        { bodyPlainText: regex },
+        { to: regex },
+        { bcc: regex },
+        { error: regex },
+      ];
+    }
+
+    if ((fromDate && !Number.isNaN(fromDate.valueOf())) || (toDate && !Number.isNaN(toDate.valueOf()))) {
+      filter.sentAt = {};
+      if (fromDate && !Number.isNaN(fromDate.valueOf())) filter.sentAt.$gte = fromDate;
+      if (toDate && !Number.isNaN(toDate.valueOf())) {
+        toDate.setHours(23, 59, 59, 999);
+        filter.sentAt.$lte = toDate;
+      }
+    }
+
+    const total = await EmailLog.countDocuments(filter);
+    const logs = await EmailLog.find(filter)
+      .sort({ sentAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    res.json({
+      success: true,
+      logs,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
