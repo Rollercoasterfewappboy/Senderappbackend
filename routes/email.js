@@ -76,7 +76,22 @@ function createSendSessionId(reqBodySessionId) {
 }
 
 function emitEmailProgress(io, userId, payload) {
-  if (!io || !userId) return;
+  if (!io || !userId) {
+    console.warn('[Email Send] socket emit skipped - missing io or userId', {
+      hasIo: !!io,
+      hasUserId: !!userId,
+      payloadSessionId: payload?.sessionId,
+    });
+    return;
+  }
+  console.log('[Email Send] socket emit email-send-progress', {
+    userId: String(userId),
+    sessionId: payload?.sessionId,
+    status: payload?.status,
+    total: payload?.total,
+    successful: payload?.successful,
+    failed: payload?.failed,
+  });
   io.to(String(userId)).emit('email-send-progress', payload);
 }
 
