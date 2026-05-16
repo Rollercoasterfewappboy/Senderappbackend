@@ -665,6 +665,10 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     const sendSessionId = createSendSessionId(req.body.sendSessionId);
     const io = getIoFromReq(req);
     const totalRecipients = uniqueRecipients.length;
+    // Counters and result collection - ensure initialized before any emitter uses them
+    let successCount = 0;
+    let failureCount = 0;
+    const results = [];
 
     const emitProgressUpdate = (partial = {}) => {
       emitEmailProgress(io, userId, {
@@ -686,11 +690,6 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
       lastResult: null,
       lastError: null,
     });
-
-    // Counters and result collection
-    let successCount = 0;
-    let failureCount = 0;
-    const results = [];
 
     for (const recipientData of uniqueRecipients) {
       try {
