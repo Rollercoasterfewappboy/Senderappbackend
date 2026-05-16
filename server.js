@@ -106,15 +106,15 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id, 'UserID:', socket.user?._id);
+  console.log('[Socket] User connected:', socket.id, 'UserID:', socket.user?._id);
 
   socket.on('join-room', (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined room`);
+    console.log('[Socket] User', userId, 'joined room', { socketId: socket.id });
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    console.log('[Socket] User disconnected:', socket.id);
   });
 });
 

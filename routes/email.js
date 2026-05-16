@@ -528,9 +528,10 @@ router.post('/settings/test', authenticateToken, requireUser, async (req, res) =
 router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload.array('attachments'), async (req, res) => {
   try {
     const userId = req.user._id;
-    const { to, bcc, subject, body, bodyPlainText, replyTo, fromName, fromEmail, bodyImage, ctaText, ctaLink, htmlAlignment, htmlMarginTop, htmlMarginBottom } = req.body;
+    const { to, bcc, subject, body, bodyPlainText, replyTo, fromName, fromEmail, bodyImage, ctaText, ctaLink, htmlAlignment, htmlMarginTop, htmlMarginBottom, sendSessionId: clientSendSessionId } = req.body;
     const timezone = req.body.timezone || 'UTC';
     const files = req.files || [];
+    console.log('[Email Send] Received sendSessionId from client:', clientSendSessionId);
     
     console.log('\n\n⚠️⚠️⚠️ [Email Send] CRITICAL EXTRACTION CHECK ⚠️⚠️⚠️');
     console.log('bodyPlainText extracted:', bodyPlainText);
@@ -686,7 +687,7 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     const results = [];
 
     const emitProgressUpdate = (partial = {}) => {
-      emitEmailProgress(io, userId, {
+      const payload = {
         sessionId: sendSessionId,
         total: totalRecipients,
         successful: successCount,
@@ -695,10 +696,17 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
         timestamp: new Date().toISOString(),
         status: 'in-progress',
         ...partial,
+      };
+      console.log('[Email Send] EMIT progress', {
+        successful: successCount,
+        failed: failureCount,
+        lastEmail: partial.lastEmail || 'none',
       });
+      emitEmailProgress(io, userId, payload);
     };
 
     // Initial progress event
+    console.log('[Email Send] START batch', { sendSessionId, totalRecipients });
     emitProgressUpdate({
       status: 'started',
       lastEmail: null,
@@ -1039,6 +1047,7 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     const actualFailed = results.filter(r => !r.success).length;
 
     // final progress event
+    console.log('[Email Send] COMPLETED batch', { actualSuccess, actualFailed, actualTotal });
     emitEmailProgress(io, userId, {
       sessionId: sendSessionId,
       total: actualTotal,
