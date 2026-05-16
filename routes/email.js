@@ -970,6 +970,16 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
           console.error('[Email Send] Provider reported failure for', recipientEmail, 'error:', result.error);
         }
 
+        console.log('[Email Send] Recipient result', {
+          recipientEmail,
+          sessionId: sendSessionId,
+          success: result.success,
+          error: result.error || null,
+          successCount,
+          failureCount,
+          pending: Math.max(0, totalRecipients - (successCount + failureCount)),
+        });
+
         results.push({
           email: recipientEmail,
           success: result.success,
@@ -1523,7 +1533,20 @@ router.get('/logs', authenticateToken, requireUser, async (req, res) => {
     const logs = await EmailLog.find(filter)
       .sort({ sentAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    console.log('[Email Send] /logs query', {
+      userId,
+      page,
+      limit,
+      statusRaw,
+      searchRaw,
+      fromDate: req.query.fromDate,
+      toDate: req.query.toDate,
+      resultCount: logs.length,
+      total,
+    });
 
     res.json({
       success: true,
