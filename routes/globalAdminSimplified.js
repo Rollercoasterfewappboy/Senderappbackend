@@ -1,9 +1,9 @@
-import express from 'express'
-import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
-import User from '../models/User.js'
-import GlobalAdmin from '../models/GlobalAdmin.js'
-import { authenticateToken, requireGlobalAdmin } from '../middleware/auth.js'
+const express = require('express')
+const bcrypt = require('bcryptjs')
+const crypto = require('crypto')
+const User = require('../models/User.js')
+const GlobalAdmin = require('../models/GlobalAdmin.js')
+const { authenticateToken, requireGlobalAdmin } = require('../middleware/auth.js')
 
 const router = express.Router()
 
@@ -167,4 +167,4 @@ router.put('/enable-user/:userId', authenticateToken, requireGlobalAdmin, async 
   }
 })
 
-export default router
+module.exports = router

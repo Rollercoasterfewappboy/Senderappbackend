@@ -147,7 +147,7 @@ function applyStylesToTag(tag, declarations) {
  * @param {boolean} keepStyleBlocks - Whether to keep <style> blocks after inlining (default: false for email)
  * @returns {string} - HTML with inlined CSS
  */
-export function inlineCssForEmail(html, keepStyleBlocks = false) {
+function inlineCssForEmail(html, keepStyleBlocks = false) {
   if (!html || typeof html !== 'string') {
     console.warn('[cssInliner] Invalid HTML content');
     return html;
@@ -209,7 +209,7 @@ export function inlineCssForEmail(html, keepStyleBlocks = false) {
  * @param {string} html - HTML content
  * @returns {string} - HTML with protected style blocks
  */
-export function protectStyleBlocks(html) {
+function protectStyleBlocks(html) {
   if (!html || typeof html !== 'string') {
     return html;
   }
@@ -231,7 +231,7 @@ export function protectStyleBlocks(html) {
  * @param {string} html - HTML content
  * @returns {string} - HTML with styles moved to head
  */
-export function ensureStylesInHead(html) {
+function ensureStylesInHead(html) {
   if (!html || typeof html !== 'string') {
     return html;
   }
@@ -260,3 +260,5 @@ export function ensureStylesInHead(html) {
   
   return result;
 }
+m o d u l e . e x p o r t s   =   {   i n l i n e C s s F o r E m a i l ,   p r o t e c t S t y l e B l o c k s ,   e n s u r e S t y l e s I n H e a d   }  
+ 

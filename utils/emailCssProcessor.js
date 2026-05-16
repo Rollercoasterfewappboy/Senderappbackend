@@ -24,7 +24,7 @@
  * @param {string} html - HTML content
  * @returns {object} - {css: string, htmlWithoutStyles: string}
  */
-export function extractStyleBlocks(html) {
+function extractStyleBlocks(html) {
   if (!html || typeof html !== 'string') {
     return { css: '', htmlWithoutStyles: html };
   }
@@ -257,7 +257,7 @@ function moveStylesToHead(html) {
  * @param {string} css - CSS text
  * @returns {string} - Cleaned CSS
  */
-export function sanitizeCssForEmail(css) {
+function sanitizeCssForEmail(css) {
   if (!css || typeof css !== 'string') {
     return '';
   }
@@ -296,7 +296,7 @@ export function sanitizeCssForEmail(css) {
  * @param {string} html - Raw HTML content (can include <style> blocks and inline styles)
  * @returns {string} - Email-safe HTML with all CSS properly inlined or in head
  */
-export function processHtmlForEmail(html) {
+function processHtmlForEmail(html) {
   // Strict passthrough mode: return the HTML exactly as provided by the sender
   // The external sender code you supplied simply reads an HTML file, performs
   // placeholder replacements/obfuscation and passes the string to Nodemailer.
@@ -311,7 +311,7 @@ export function processHtmlForEmail(html) {
   return html;
 }
 
-export default {
+module.exports = {
   processHtmlForEmail,
   extractStyleBlocks,
   sanitizeCssForEmail,

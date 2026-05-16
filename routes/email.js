@@ -1,9 +1,10 @@
 
 
 
-import express from 'express';
-import multer from 'multer';
-import nodemailer from 'nodemailer';
+
+const express = require('express');
+const multer = require('multer');
+const nodemailer = require('nodemailer');
 
 /*
  * CRITICAL EMAIL HTML RENDERING GUIDELINES
@@ -26,14 +27,14 @@ import nodemailer from 'nodemailer';
  * CSS appears as visible text and buttons are malformed in inboxes.
  */
 
-import { authenticateToken, requireUser, requireAuthorizedIp } from '../middleware/auth.js';
-import EmailProvider from '../models/EmailProvider.js';
-import EmailLog from '../models/EmailLog.js';
-import SmtpLog from '../models/SmtpLog.js';
-import { sendEmailWithProvider, decodeHtmlEntities } from '../utils/emailSenders.js';
+const { authenticateToken, requireUser, requireAuthorizedIp } = require('../middleware/auth.js');
+const EmailProvider = require('../models/EmailProvider.js');
+const EmailLog = require('../models/EmailLog.js');
+const SmtpLog = require('../models/SmtpLog.js');
+const { sendEmailWithProvider, decodeHtmlEntities } = require('../utils/emailSenders.js');
 // HTML-to-plain-text conversion is no longer performed by the backend.
 // import { htmlToPlainText } from '../utils/htmlSanitizer.js';
-import { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyContent } from '../utils/emailTemplates.js';
+const { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyContent } = require('../utils/emailTemplates.js');
 // The following imports were required when we were performing CSS inlining
 // and HTML sanitization.  The requirements have changed: we now pass the
 // sender-provided HTML through untouched, exactly the same way the standalone
@@ -44,11 +45,11 @@ import { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyConten
 // to provide valid email-ready HTML.
 
 // NOTE: cssInliner and emailCssProcessor imports were intentionally dropped.
-import placeholderService from '../services/placeholderService.js';
-import path from 'path';
-import fs from 'fs';
-import cloudinary from 'cloudinary';
-import crypto from 'crypto';
+const placeholderService = require('../services/placeholderService.js');
+const path = require('path');
+const fs = require('fs');
+const cloudinary = require('cloudinary');
+const crypto = require('crypto');
 
 const router = express.Router();
 
@@ -62,39 +63,6 @@ const DEFAULT_SMTP_CONFIG = {
   encryption: 'ssl',
   requireAuth: true,
 };
-
-function getIoFromReq(req) {
-  return req.app && typeof req.app.get === 'function' ? req.app.get('io') : null;
-}
-
-function createSendSessionId(reqBodySessionId) {
-  if (reqBodySessionId) return reqBodySessionId;
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `send-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-}
-
-function emitEmailProgress(io, userId, payload) {
-  if (!io || !userId) {
-    console.warn('[Email Send] socket emit skipped - missing io or userId', {
-      hasIo: !!io,
-      hasUserId: !!userId,
-      payloadSessionId: payload?.sessionId,
-    });
-    return;
-  }
-  console.log('[Email Send] socket emit email-send-progress', {
-    userId: String(userId),
-    sessionId: payload?.sessionId,
-    subject: payload?.subject,
-    status: payload?.status,
-    total: payload?.total,
-    successful: payload?.successful,
-    failed: payload?.failed,
-  });
-  io.to(String(userId)).emit('email-send-progress', payload);
-}
 
 // Configure Cloudinary from env
 cloudinary.v2.config({
@@ -529,10 +497,9 @@ router.post('/settings/test', authenticateToken, requireUser, async (req, res) =
 router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload.array('attachments'), async (req, res) => {
   try {
     const userId = req.user._id;
-    const { to, bcc, subject, body, bodyPlainText, replyTo, fromName, fromEmail, bodyImage, ctaText, ctaLink, htmlAlignment, htmlMarginTop, htmlMarginBottom, sendSessionId: clientSendSessionId } = req.body;
+    const { to, bcc, subject, body, bodyPlainText, replyTo, fromName, fromEmail, bodyImage, ctaText, ctaLink, htmlAlignment, htmlMarginTop, htmlMarginBottom } = req.body;
     const timezone = req.body.timezone || 'UTC';
     const files = req.files || [];
-    console.log('[Email Send] Received sendSessionId from client:', clientSendSessionId);
     
     console.log('\n\n⚠️⚠️⚠️ [Email Send] CRITICAL EXTRACTION CHECK ⚠️⚠️⚠️');
     console.log('bodyPlainText extracted:', bodyPlainText);
@@ -679,41 +646,26 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     // diagnostic: show final recipient roster after dedup
     console.log('[Email Send] Unique recipient list after deduplication:', uniqueRecipients);
 
-    const sendSessionId = createSendSessionId(req.body.sendSessionId);
-    const io = getIoFromReq(req);
-    const totalRecipients = uniqueRecipients.length;
-    // Counters and result collection - ensure initialized before any emitter uses them
+    // Emit initial start progress for single send
+    try {
+      const io = req.app.get('io');
+      const totalRecipients = uniqueRecipients.length;
+      if (io) {
+        io.to(String(userId)).emit('email-send-start', {
+          total: totalRecipients,
+          successful: 0,
+          failed: 0,
+          remaining: totalRecipients,
+        });
+      }
+    } catch (emitErr) {
+      console.warn('[Email Send] Failed to emit start event:', emitErr.message);
+    }
+
+    // Counters and result collection
     let successCount = 0;
     let failureCount = 0;
     const results = [];
-
-    const emitProgressUpdate = (partial = {}) => {
-      const payload = {
-        sessionId: sendSessionId,
-        total: totalRecipients,
-        successful: successCount,
-        failed: failureCount,
-        pending: Math.max(0, totalRecipients - (successCount + failureCount)),
-        timestamp: new Date().toISOString(),
-        status: 'in-progress',
-        ...partial,
-      };
-      console.log('[Email Send] EMIT progress', {
-        successful: successCount,
-        failed: failureCount,
-        lastEmail: partial.lastEmail || 'none',
-      });
-      emitEmailProgress(io, userId, payload);
-    };
-
-    // Initial progress event
-    console.log('[Email Send] START batch', { sendSessionId, totalRecipients });
-    emitProgressUpdate({
-      status: 'started',
-      lastEmail: null,
-      lastResult: null,
-      lastError: null,
-    });
 
     for (const recipientData of uniqueRecipients) {
       try {
@@ -878,7 +830,7 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
         // }
 
         // 🔧 DIAGNOSTIC: Before plain text cleanup in routes
-        const beforeCleanupRoute = renderedPlainText;
+        const beforeCleanupRoute = renderedPlainText || '';
         const beforeLinesRoute = beforeCleanupRoute.split('\n');
         const blankLineCountRoute = beforeLinesRoute.filter(line => line.trim().length === 0).length;
         console.log(`[Email Send] 🔧 PLAIN TEXT BEFORE CLEANUP:`, {
@@ -908,25 +860,6 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
         });
         
         // Send email
-        const pendingLog = await EmailLog.create({
-          userId,
-          to: toField,
-          bcc: bccField,
-          subject: renderedSubject,
-          body: renderedBody,
-          bodyPlainText: renderedPlainText,
-          ctaText: renderedCtaText,
-          ctaLink: renderedCtaLink,
-          attachments: attachments.map(a => a.path),
-          replyTo,
-          fromName,
-          provider: providerDoc.provider,
-          smtpUsed: null,
-          status: 'Pending',
-          error: null,
-          sentAt: new Date(),
-        });
-
         const result = await sendEmailWithProvider({
           providerDoc,
           to: toField,
@@ -978,60 +911,68 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
           failureCount++;
           console.error('[Email Send] Provider reported failure for', recipientEmail, 'error:', result.error);
         }
-
-        console.log('[Email Send] Recipient result', {
-          recipientEmail,
-          sessionId: sendSessionId,
-          success: result.success,
-          error: result.error || null,
-          successCount,
-          failureCount,
-          pending: Math.max(0, totalRecipients - (successCount + failureCount)),
-        });
-
+        
         results.push({
           email: recipientEmail,
           success: result.success,
           error: result.error || null,
         });
-
+        
+        // Emit real-time progress to the user's socket room
         try {
-          pendingLog.status = result.success ? 'Success' : 'Failed';
-          pendingLog.smtpUsed = result.smtpUsed || null;
-          pendingLog.error = result.error || null;
-          await pendingLog.save();
-        } catch (logError) {
-          console.error('Failed to update email log:', logError);
+          const io = req.app.get('io');
+          const total = uniqueRecipients.length;
+          const successful = results.filter(r => r.success).length;
+          const failed = results.filter(r => !r.success).length;
+          const remaining = total - (successful + failed);
+          if (io) {
+            io.to(String(userId)).emit('email-send-progress', {
+              total,
+              successful,
+              failed,
+              remaining,
+              last: {
+                email: recipientEmail,
+                subject: renderedSubject,
+                smtpUsed: result.smtpUsed || null,
+                success: result.success,
+                error: result.error || null,
+                sentAt: new Date().toISOString(),
+              },
+            });
+          }
+        } catch (emitErr) {
+          console.warn('[Email Send] Failed to emit progress event:', emitErr.message);
         }
-
-        emitProgressUpdate({
-          lastEmail: recipientEmail,
-          lastResult: result.success ? 'sent' : 'failed',
-          lastError: result.error || null,
-          subject: renderedSubject,
-          smtpUsed: result.smtpUsed || null,
-        });
+        // Log email
+        try {
+          await EmailLog.create({
+            userId,
+            to: toField,
+            bcc: bccField,
+            subject: renderedSubject,
+            body: renderedBody,
+            bodyPlainText: renderedPlainText,
+            ctaText: renderedCtaText,
+            ctaLink: renderedCtaLink,
+            attachments: attachments.map(a => a.path),
+            replyTo,
+            fromName,
+            provider: providerDoc.provider,
+            smtpUsed: result.smtpUsed || null,
+            status: result.success ? 'Success' : 'Failed',
+            error: result.error || null,
+            sentAt: new Date(),
+          });
+        } catch (logError) {
+          console.error('Failed to log email:', logError);
+        }
       } catch (error) {
         failureCount++;
         results.push({
           email: recipientData.email,
           success: false,
           error: error.message,
-        });
-        if (typeof pendingLog !== 'undefined' && pendingLog) {
-          try {
-            pendingLog.status = 'Failed';
-            pendingLog.error = error.message;
-            await pendingLog.save();
-          } catch (logError) {
-            console.error('Failed to update pending email log after exception:', logError);
-          }
-        }
-        emitProgressUpdate({
-          lastEmail: recipientData.email,
-          lastResult: 'failed',
-          lastError: error.message,
-          subject: renderedSubject,
         });
         console.error(`Error sending to ${recipientData.email}:`, error.message);
       }
@@ -1049,21 +990,6 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
     // fallback in case counts diverge
     const actualSuccess = results.filter(r => r.success).length;
     const actualFailed = results.filter(r => !r.success).length;
-
-    // final progress event
-    console.log('[Email Send] COMPLETED batch', { actualSuccess, actualFailed, actualTotal });
-    emitEmailProgress(io, userId, {
-      sessionId: sendSessionId,
-      total: actualTotal,
-      successful: actualSuccess,
-      failed: actualFailed,
-      pending: 0,
-      timestamp: new Date().toISOString(),
-      status: 'completed',
-      lastEmail: results.length > 0 ? results[results.length - 1].email : null,
-      lastResult: results.length > 0 ? (results[results.length - 1].success ? 'sent' : 'failed') : null,
-      lastError: results.length > 0 ? results[results.length - 1].error : null,
-    });
 
     // overall success if at least one recipient was delivered
     const responseObj = {
@@ -1083,6 +1009,20 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
       responseObj.error = `Failed to send to ${actualFailed} recipient${actualFailed === 1 ? '' : 's'}`;
     }
     console.log('[Email Send] Responding with result object:', responseObj);
+    // Emit completion event with summary
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(String(userId)).emit('email-send-complete', {
+          total: responseObj.summary.total,
+          successful: responseObj.summary.successful,
+          failed: responseObj.summary.failed,
+          results: responseObj.results,
+        });
+      }
+    } catch (emitErr) {
+      console.warn('[Email Send] Failed to emit completion event:', emitErr.message);
+    }
     res.json(responseObj);
 
     // === CLEANUP: remove uploaded attachment files now that email(s) have been sent ===
@@ -1140,6 +1080,21 @@ router.post('/send-bulk', authenticateToken, requireUser, requireAuthorizedIp, u
     }
 
     console.log(`[Bulk Send] Processing ${validRecipients.length} recipients with placeholders`);
+
+    // Emit initial start progress for bulk send
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(String(userId)).emit('email-send-start', {
+          total: validRecipients.length,
+          successful: 0,
+          failed: 0,
+          remaining: validRecipients.length,
+        });
+      }
+    } catch (emitErr) {
+      console.warn('[Bulk Send] Failed to emit start event:', emitErr.message);
+    }
 
     // Get email provider
     const providerDoc = await EmailProvider.findOne({ userId });
@@ -1277,7 +1232,7 @@ router.post('/send-bulk', authenticateToken, requireUser, requireAuthorizedIp, u
         // }
 
         // 🔧 DIAGNOSTIC: Before cleanup in bulk send
-        const beforeCleanupBulk = renderedPlainText;
+        const beforeCleanupBulk = renderedPlainText || '';
         const beforeLinesBulk = beforeCleanupBulk.split('\n');
         const blankLineCountBulk = beforeLinesBulk.filter(line => line.trim().length === 0).length;
         console.log(`[Email Send Bulk] 🔧 PLAIN TEXT BEFORE CLEANUP:`, {
@@ -1364,6 +1319,33 @@ router.post('/send-bulk', authenticateToken, requireUser, requireAuthorizedIp, u
           error: result.error || null,
         });
 
+        // Emit real-time progress to user's socket room (bulk)
+        try {
+          const io = req.app.get('io');
+          const total = validRecipients.length;
+          const successful = results.filter(r => r.success).length;
+          const failed = results.filter(r => !r.success).length;
+          const remaining = total - (successful + failed);
+          if (io) {
+            io.to(String(userId)).emit('email-send-progress', {
+              total,
+              successful,
+              failed,
+              remaining,
+              last: {
+                email: recipient.email,
+                subject: renderedSubject,
+                smtpUsed: result.smtpUsed || null,
+                success: result.success,
+                error: result.error || null,
+                sentAt: new Date().toISOString(),
+              },
+            });
+          }
+        } catch (emitErr) {
+          console.warn('[Bulk Send] Failed to emit progress event:', emitErr.message);
+        }
+
         // Log each email
         try {
           await EmailLog.create({
@@ -1416,6 +1398,20 @@ router.post('/send-bulk', authenticateToken, requireUser, requireAuthorizedIp, u
       bulkResponse.error = `Failed to send to ${bulkFailed} recipient${bulkFailed === 1 ? '' : 's'}`;
     }
     console.log('[Bulk Send] Responding with result object:', bulkResponse);
+    // Emit completion event for bulk send
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(String(userId)).emit('email-send-complete', {
+          total: bulkResponse.summary.total,
+          successful: bulkResponse.summary.successful,
+          failed: bulkResponse.summary.failed,
+          results: bulkResponse.results,
+        });
+      }
+    } catch (emitErr) {
+      console.warn('[Bulk Send] Failed to emit completion event:', emitErr.message);
+    }
     res.json(bulkResponse);
   } catch (error) {
     console.error('Bulk send error:', error);
@@ -1501,91 +1497,41 @@ router.post('/preview-template', authenticateToken, requireUser, (req, res) => {
   }
 });
 
-// Get email logs
+// Get email logs with pagination support
 router.get('/logs', authenticateToken, requireUser, async (req, res) => {
   try {
-    const userId = req.user._id;
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
-    const statusRaw = typeof req.query.status === 'string' ? req.query.status.trim() : '';
-    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-    const fromDate = req.query.fromDate ? new Date(req.query.fromDate) : null;
-    const toDate = req.query.toDate ? new Date(req.query.toDate) : null;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit) || 25));
+    const skip = (page - 1) * limit;
 
-    const filter = { userId };
+    const query = { userId: req.user._id };
+    const [logs, total] = await Promise.all([
+      EmailLog.find(query).sort({ sentAt: -1 }).skip(skip).limit(limit),
+      EmailLog.countDocuments(query),
+    ]);
 
-    if (statusRaw && statusRaw !== 'All') {
-      const statusList = statusRaw.split(',').map((item) => item.trim()).filter(Boolean);
-      if (statusList.length > 0) {
-        filter.status = { $in: statusList };
-      }
-    }
-
-    if (searchRaw) {
-      const escaped = searchRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(escaped, 'i');
-      filter.$or = [
-        { subject: regex },
-        { bodyPlainText: regex },
-        { to: regex },
-        { bcc: regex },
-        { error: regex },
-      ];
-    }
-
-    if ((fromDate && !Number.isNaN(fromDate.valueOf())) || (toDate && !Number.isNaN(toDate.valueOf()))) {
-      filter.sentAt = {};
-      if (fromDate && !Number.isNaN(fromDate.valueOf())) filter.sentAt.$gte = fromDate;
-      if (toDate && !Number.isNaN(toDate.valueOf())) {
-        toDate.setHours(23, 59, 59, 999);
-        filter.sentAt.$lte = toDate;
-      }
-    }
-
-    const total = await EmailLog.countDocuments(filter);
-    const logs = await EmailLog.find(filter)
-      .sort({ sentAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
-
-    console.log('[Email Send] /logs query', {
-      userId,
-      page,
-      limit,
-      statusRaw,
-      searchRaw,
-      fromDate: req.query.fromDate,
-      toDate: req.query.toDate,
-      filterSummary: {
-        hasStatus: Boolean(statusRaw && statusRaw !== 'All'),
-        hasSearch: Boolean(searchRaw),
-        hasDateFilter: Boolean(req.query.fromDate || req.query.toDate),
-      },
-      resultCount: logs.length,
-      total,
-    });
-
-    res.json({
-      success: true,
-      logs,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+    const totalPages = Math.ceil(total / limit);
+    res.json({ success: true, logs, pagination: { total, page, limit, totalPages } });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// Get SMTP failover logs
+// Get SMTP failover logs with pagination support
 router.get('/smtp-logs', authenticateToken, requireUser, async (req, res) => {
   try {
-    const logs = await SmtpLog.find({ userId: req.user._id }).sort({ createdAt: -1 }).limit(200);
-    res.json({ logs });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit) || 25));
+    const skip = (page - 1) * limit;
+    const query = { userId: req.user._id };
+
+    const [logs, total] = await Promise.all([
+      SmtpLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      SmtpLog.countDocuments(query),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+    res.json({ success: true, logs, pagination: { total, page, limit, totalPages } });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1691,7 +1637,33 @@ router.delete('/logs', authenticateToken, requireUser, async (req, res) => {
   }
 });
 
-export default router;
+// ===== DIAGNOSTIC ENDPOINT =====
+// GET current detected public IP for the authenticated user
+// Purpose: verify what IP the system sees, for debugging IP authorization issues
+router.get('/debug/check-current-ip', authenticateToken, (req, res) => {
+  const { getClientIP, parseProxyIps, isPrivateIP, normalizeIpRaw } = require('../middleware/auth.js');
+
+  const requestIPs = parseProxyIps(req);
+  const detectedIp = getClientIP(req);
+  const isPrivate = isPrivateIP(detectedIp);
+  const userAuthorizedIps = (req.user.authorizedIps || []).map((item) => normalizeIpRaw(item.ip));
+
+  const result = {
+    currentDetectedIp: detectedIp,
+    isPrivateIP: isPrivate,
+    allDetectedIPs: requestIPs,
+    userAuthorizedIPs: userAuthorizedIps,
+    ipMatch: userAuthorizedIps.includes(detectedIp),
+    canSend: !isPrivate && userAuthorizedIps.includes(detectedIp),
+    message: !isPrivate && userAuthorizedIps.includes(detectedIp) 
+      ? '✅ Sender can send - current IP is authorized'
+      : `❌ Sender blocked - ${!isPrivate ? 'current IP not in authorized list' : 'private IP detected, not allowed'}`
+  };
+
+  res.json(result);
+});
+
+module.exports = router;
 
 
 

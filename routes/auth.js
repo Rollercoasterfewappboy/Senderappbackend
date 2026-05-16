@@ -1,11 +1,12 @@
 
 
-import express from 'express'
-import jwt from 'jsonwebtoken'
-import crypto from 'crypto'
-import User from '../models/User.js'
-import { authenticateToken, getRequestIp } from '../middleware/auth.js'
-import { getMaskedBankDetails } from '../utils/encryption.js'
+
+const express = require('express')
+const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
+const User = require('../models/User.js')
+const { authenticateToken, getRequestIp } = require('../middleware/auth.js')
+const { getMaskedBankDetails } = require('../utils/encryption.js')
 
 const router = express.Router()
 
@@ -233,7 +234,7 @@ router.post('/confirm-email/:token', async (req, res) => {
 })
 
 // Get profile
-import { encryptText, decryptText, isEncrypted } from '../utils/encryption.js'
+const { encryptText, decryptText, isEncrypted } = require('../utils/encryption.js')
 
 router.get('/profile', authenticateToken, async (req, res) => {
   // Migrate any plaintext bank fields to encrypted form (run once per field) without logging plaintext
@@ -334,7 +335,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
   }
 })
 
-export default router
+module.exports = router
 
 
 

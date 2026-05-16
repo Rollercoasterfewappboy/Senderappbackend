@@ -1,10 +1,10 @@
-import express from 'express'
-import ContentReport from '../models/ContentReport.js'
-import ModerationAction from '../models/ModerationAction.js'
-import Website from '../models/Website.js'
-import User from '../models/User.js'
-import { verifyToken } from '../middleware/auth.js'
-import { generateReportId } from '../utils/websiteUtils.js'
+const express = require('express')
+const ContentReport = require('../models/ContentReport.js')
+const ModerationAction = require('../models/ModerationAction.js')
+const Website = require('../models/Website.js')
+const User = require('../models/User.js')
+const { verifyToken } = require('../middleware/auth.js')
+const { generateReportId } = require('../utils/websiteUtils.js')
 
 const router = express.Router()
 
@@ -418,7 +418,7 @@ router.get('/admin/dashboard', verifyToken, async (req, res) => {
   }
 })
 
-export default router
+module.exports = router
 
 
 

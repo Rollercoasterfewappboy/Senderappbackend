@@ -1,0 +1,4 @@
+node_modules/puppeteer/.local-chromium/**
+node_modules/puppeteer-core/.local-chromium/**
+node_modules/.bin/puppeteer
+node_modules/.bin/puppeteer-core

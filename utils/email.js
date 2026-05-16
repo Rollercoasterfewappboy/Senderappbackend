@@ -1,6 +1,6 @@
-import express from 'express';
-import multer from 'multer';
-import nodemailer from 'nodemailer';
+const express = require('express');
+const multer = require('multer');
+const nodemailer = require('nodemailer');
 
 /*
  * CRITICAL EMAIL HTML RENDERING GUIDELINES
@@ -23,13 +23,13 @@ import nodemailer from 'nodemailer';
  * CSS appears as visible text and buttons are malformed in inboxes.
  */
 
-import { authenticateToken, requireUser } from '../middleware/auth.js';
-import EmailProvider from '../models/EmailProvider.js';
-import EmailLog from '../models/EmailLog.js';
-import { sendEmailWithProvider, decodeHtmlEntities } from '../utils/emailSenders.js';
+const { authenticateToken, requireUser } = require('../middleware/auth.js');
+const EmailProvider = require('../models/EmailProvider.js');
+const EmailLog = require('../models/EmailLog.js');
+const { sendEmailWithProvider, decodeHtmlEntities } = require('../utils/emailSenders.js');
 // HTML-to-plain-text conversion is no longer performed by the backend.
 // import { htmlToPlainText } from '../utils/htmlSanitizer.js';
-import { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyContent } from '../utils/emailTemplates.js';
+const { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyContent } = require('../utils/emailTemplates.js');
 // The following imports were required when we were performing CSS inlining
 // and HTML sanitization.  The requirements have changed: we now pass the
 // sender-provided HTML through untouched, exactly the same way the standalone
@@ -40,11 +40,11 @@ import { generateProfessionalEmailTemplate, validateEmailHtml, extractBodyConten
 // to provide valid email-ready HTML.
 
 // NOTE: cssInliner and emailCssProcessor imports were intentionally dropped.
-import placeholderService from '../services/placeholderService.js';
-import path from 'path';
-import fs from 'fs';
-import cloudinary from 'cloudinary';
-import crypto from 'crypto';
+const placeholderService = require('../services/placeholderService.js');
+const path = require('path');
+const fs = require('fs');
+const cloudinary = require('cloudinary');
+const crypto = require('crypto');
 
 const router = express.Router();
 
@@ -1341,7 +1341,7 @@ router.delete('/logs', authenticateToken, requireUser, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
 
 
 

@@ -1,14 +1,14 @@
-import express from 'express'
-import crypto from 'crypto'
-import jwt from 'jsonwebtoken'
-import fs from 'fs'
-import path from 'path'
-import User from '../models/User.js'
-import GlobalAdmin from '../models/GlobalAdmin.js'
-import Note from '../models/Note.js'
-import EmailLog from '../models/EmailLog.js'
-import SmsLog from '../models/SmsLog.js'
-import { authenticateToken, requireGlobalAdmin } from '../middleware/auth.js'
+const express = require('express')
+const crypto = require('crypto')
+const jwt = require('jsonwebtoken')
+const fs = require('fs')
+const path = require('path')
+const User = require('../models/User.js')
+const GlobalAdmin = require('../models/GlobalAdmin.js')
+const Note = require('../models/Note.js')
+const EmailLog = require('../models/EmailLog.js')
+const SmsLog = require('../models/SmsLog.js')
+const { authenticateToken, requireGlobalAdmin, getHeaderIP } = require('../middleware/auth.js')
 
 const router = express.Router()
 
@@ -148,8 +148,7 @@ router.post('/users/:id/auto-add-current-ip', authenticateToken, requireGlobalAd
     }
 
     // Get current request IP
-    const { getRequestIp } = await import('../middleware/auth.js')
-    const currentIp = getRequestIp(req)
+    const currentIp = getHeaderIP(req)
 
     if (!currentIp) {
       return res.status(400).json({ success: false, message: 'Could not determine current IP' })
@@ -157,12 +156,12 @@ router.post('/users/:id/auto-add-current-ip', authenticateToken, requireGlobalAd
 
     // Check if IP already exists
     const normalizedIp = currentIp.trim().replace('::ffff:', '')
-    if (user.authorizedIps.some((entry) => entry.ip === normalizedIp)) {
+    if (user.authorizedIps.some(item => item.ip === normalizedIp)) {
       return res.status(400).json({ success: false, message: 'IP already authorized' })
     }
 
     // Add the IP
-    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin' })
+    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin', addedAt: new Date() })
     await user.save()
 
     return res.json({
@@ -191,11 +190,11 @@ router.post('/users/:id/authorized-ips', authenticateToken, requireGlobalAdmin, 
 
     const normalizedIp = ip.trim().replace('::ffff:', '')
 
-    if (user.authorizedIps.some((entry) => entry.ip === normalizedIp)) {
+    if (user.authorizedIps.some(item => item.ip === normalizedIp)) {
       return res.status(400).json({ success: false, message: 'IP already authorized' })
     }
 
-    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin' })
+    user.authorizedIps.push({ ip: normalizedIp, addedBy: req.globalAdmin?.email || 'global-admin', addedAt: new Date() })
     await user.save()
 
     return res.json({ success: true, message: 'IP authorized', authorizedIps: user.authorizedIps })
@@ -215,7 +214,7 @@ router.delete('/users/:id/authorized-ips/:ip', authenticateToken, requireGlobalA
 
     const targetIp = req.params.ip.trim().replace('::ffff:', '')
     const initialLen = user.authorizedIps.length
-    user.authorizedIps = user.authorizedIps.filter((entry) => entry.ip !== targetIp)
+    user.authorizedIps = user.authorizedIps.filter((item) => item.ip !== targetIp)
 
     if (user.authorizedIps.length === initialLen) {
       return res.status(404).json({ success: false, message: 'IP not found' })
@@ -225,6 +224,185 @@ router.delete('/users/:id/authorized-ips/:ip', authenticateToken, requireGlobalA
     return res.json({ success: true, message: 'IP removed', authorizedIps: user.authorizedIps })
   } catch (err) {
     console.error('remove authorized ip error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// ========================
+// DYNAMIC IP MANAGEMENT
+// ========================
+
+// GET /users/:id/ip-history - View IP change history
+router.get('/users/:id/ip-history', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('ipHistory authorizedIps')
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const history = (user.ipHistory || []).sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt))
+    
+    return res.json({
+      success: true,
+      ipHistory: history,
+      totalChanges: history.length,
+      currentAuthorizedIps: user.authorizedIps || []
+    })
+  } catch (err) {
+    console.error('get ip history error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// GET /users/:id/ip-config - View IP auto-update configuration
+router.get('/users/:id/ip-config', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('ipAutoUpdateConfig authorizedIps')
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const autoAddedIPs = (user.authorizedIps || []).filter(item => item.autoAdded)
+
+    return res.json({
+      success: true,
+      ipConfig: user.ipAutoUpdateConfig || {},
+      autoAddedCount: autoAddedIPs.length,
+      autoAddedIPs: autoAddedIPs
+    })
+  } catch (err) {
+    console.error('get ip config error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// PUT /users/:id/ip-config - Update IP auto-update configuration
+router.put('/users/:id/ip-config', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const { autoAddNewIPs, maxAutoAddedIPs, notifyOnAutoAdd } = req.body
+
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    // Initialize if not exists
+    if (!user.ipAutoUpdateConfig) {
+      user.ipAutoUpdateConfig = {}
+    }
+
+    // Update fields
+    if (typeof autoAddNewIPs === 'boolean') {
+      user.ipAutoUpdateConfig.autoAddNewIPs = autoAddNewIPs
+    }
+    if (typeof maxAutoAddedIPs === 'number' && maxAutoAddedIPs > 0) {
+      user.ipAutoUpdateConfig.maxAutoAddedIPs = maxAutoAddedIPs
+    }
+    if (typeof notifyOnAutoAdd === 'boolean') {
+      user.ipAutoUpdateConfig.notifyOnAutoAdd = notifyOnAutoAdd
+    }
+
+    await user.save()
+
+    return res.json({
+      success: true,
+      message: 'IP configuration updated',
+      ipConfig: user.ipAutoUpdateConfig
+    })
+  } catch (err) {
+    console.error('update ip config error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// POST /users/:id/approve-pending-ip/:ip - Approve an auto-added IP
+router.post('/users/:id/approve-pending-ip/:ip', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const targetIp = req.params.ip.trim().replace('::ffff:', '')
+    const ipEntry = (user.authorizedIps || []).find(item => item.ip === targetIp)
+
+    if (!ipEntry) {
+      return res.status(404).json({ success: false, message: 'IP not found in authorized list' })
+    }
+
+    if (ipEntry.status === 'approved') {
+      return res.json({ success: true, message: 'IP already approved', authorizedIps: user.authorizedIps })
+    }
+
+    // Mark as approved
+    ipEntry.status = 'approved'
+
+    // Record in history
+    if (!user.ipHistory) {
+      user.ipHistory = []
+    }
+    user.ipHistory.push({
+      oldIp: null,
+      newIp: targetIp,
+      changeType: 'approved',
+      changedBy: req.globalAdmin?.email || 'global-admin',
+      reason: 'Admin approved auto-added IP',
+      changedAt: new Date()
+    })
+
+    await user.save()
+
+    return res.json({
+      success: true,
+      message: 'IP approved',
+      authorizedIps: user.authorizedIps
+    })
+  } catch (err) {
+    console.error('approve pending ip error:', err)
+    return res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+// POST /users/:id/reject-pending-ip/:ip - Reject and remove an auto-added IP
+router.post('/users/:id/reject-pending-ip/:ip', authenticateToken, requireGlobalAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const targetIp = req.params.ip.trim().replace('::ffff:', '')
+    const initialLen = user.authorizedIps.length
+
+    // Remove the IP
+    user.authorizedIps = user.authorizedIps.filter(item => item.ip !== targetIp)
+
+    if (user.authorizedIps.length === initialLen) {
+      return res.status(404).json({ success: false, message: 'IP not found' })
+    }
+
+    // Record in history
+    if (!user.ipHistory) {
+      user.ipHistory = []
+    }
+    user.ipHistory.push({
+      oldIp: targetIp,
+      newIp: null,
+      changeType: 'rejected',
+      changedBy: req.globalAdmin?.email || 'global-admin',
+      reason: 'Admin rejected auto-added IP',
+      changedAt: new Date()
+    })
+
+    await user.save()
+
+    return res.json({
+      success: true,
+      message: 'IP rejected and removed',
+      authorizedIps: user.authorizedIps
+    })
+  } catch (err) {
+    console.error('reject pending ip error:', err)
     return res.status(500).json({ success: false, message: err.message })
   }
 })
@@ -332,7 +510,7 @@ router.delete('/users/:id', authenticateToken, requireGlobalAdmin, async (req, r
   }
 })
 
-export default router
+module.exports = router
 
 
 

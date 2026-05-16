@@ -1,6 +1,6 @@
-import multer from 'multer'
-import { v2 as cloudinary } from 'cloudinary'
-import { CloudinaryStorage } from 'multer-storage-cloudinary'
+const multer = require('multer')
+const { v2: cloudinary } = require('cloudinary')
+const { CloudinaryStorage } = require('multer-storage-cloudinary')
 
 // Configure Cloudinary
 cloudinary.config({
@@ -62,7 +62,7 @@ const fileFilter = (req, file, cb) => {
 // =====================
 // MULTER UPLOAD MIDDLEWARE
 // =====================
-export const uploadMulter = multer({
+const uploadMulter = multer({
   storage: memoryStorage,
   fileFilter,
   limits: {
@@ -76,7 +76,7 @@ export const uploadMulter = multer({
 // =====================
 // Uploads images from memory to Cloudinary
 // Returns array of uploaded image objects
-export const uploadImagesToCloudinary = async (files) => {
+const uploadImagesToCloudinary = async (files) => {
   if (!files || files.length === 0) return []
 
   const imageFiles = files.filter(f => ALLOWED_IMAGE_TYPES.includes(f.mimetype))
@@ -122,7 +122,7 @@ export const uploadImagesToCloudinary = async (files) => {
 // =====================
 // Uploads a single video from memory to Cloudinary
 // Returns uploaded video object
-export const uploadVideoToCloudinary = async (file) => {
+const uploadVideoToCloudinary = async (file) => {
   if (!file || !ALLOWED_VIDEO_TYPES.includes(file.mimetype)) {
     return null
   }
@@ -163,7 +163,7 @@ export const uploadVideoToCloudinary = async (file) => {
 // =====================
 // Uploads multiple videos from memory to Cloudinary
 // Returns array of uploaded video objects
-export const uploadVideosToCloudinary = async (files) => {
+const uploadVideosToCloudinary = async (files) => {
   if (!files || files.length === 0) return []
 
   const videoFiles = files.filter(f => ALLOWED_VIDEO_TYPES.includes(f.mimetype))
@@ -209,7 +209,7 @@ export const uploadVideosToCloudinary = async (files) => {
 // =====================
 // Uploads PDF files from memory to Cloudinary
 // Returns array of uploaded PDF objects
-export const uploadPDFsToCloudinary = async (files) => {
+const uploadPDFsToCloudinary = async (files) => {
   if (!files || files.length === 0) return []
 
   const pdfFiles = files.filter(f => ALLOWED_PDF_TYPES.includes(f.mimetype))
@@ -249,7 +249,7 @@ export const uploadPDFsToCloudinary = async (files) => {
 // DELETE MEDIA FROM CLOUDINARY
 // =====================
 // Deletes a single media file from Cloudinary
-export const deleteMediaFromCloudinary = async (publicId) => {
+const deleteMediaFromCloudinary = async (publicId) => {
   if (!publicId) return
 
   try {
@@ -267,7 +267,7 @@ export const deleteMediaFromCloudinary = async (publicId) => {
 // DELETE MULTIPLE MEDIA FILES
 // =====================
 // Deletes multiple media files from Cloudinary
-export const deleteMediaArrayFromCloudinary = async (mediaArray) => {
+const deleteMediaArrayFromCloudinary = async (mediaArray) => {
   if (!mediaArray || mediaArray.length === 0) return
 
   const deletePromises = mediaArray.map(media =>
@@ -287,7 +287,7 @@ export const deleteMediaArrayFromCloudinary = async (mediaArray) => {
 // =====================
 // Validates media upload limits (images + optional video)
 // Returns { valid: boolean, error?: string }
-export const validateMediaLimits = (currentMedia, newImages, newVideo) => {
+const validateMediaLimits = (currentMedia, newImages, newVideo) => {
   let currentVideoSize = 0
   if (currentMedia?.video) {
     if (Array.isArray(currentMedia.video)) {
@@ -323,7 +323,7 @@ export const validateMediaLimits = (currentMedia, newImages, newVideo) => {
 // =====================
 // Extracts images, videos, and PDFs from multer request
 // Returns { images: [], video: [], attachments: [] }
-export const extractMediaFromRequest = (req) => {
+const extractMediaFromRequest = (req) => {
   const result = {
     images: [],
     video: [],
@@ -347,7 +347,7 @@ export const extractMediaFromRequest = (req) => {
   return result
 }
 
-export default {
+module.exports = {
   uploadMulter,
   uploadImagesToCloudinary,
   uploadVideoToCloudinary,

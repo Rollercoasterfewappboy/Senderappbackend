@@ -1,6 +1,6 @@
-import jwt from 'jsonwebtoken'
-import User from '../models/User.js'
-import GlobalAdmin from '../models/GlobalAdmin.js'
+const jwt = require('jsonwebtoken')
+const User = require('../models/User.js')
+const GlobalAdmin = require('../models/GlobalAdmin.js')
 
 const normalizeIpRaw = (ip) => {
   if (!ip) return ''
@@ -17,68 +17,92 @@ const normalizeIpRaw = (ip) => {
   return value
 }
 
+const isPrivateIP = (ip) => {
+  if (!ip) return true
+  const value = String(ip).trim().toLowerCase()
+  // Check for private/loopback IPs
+  return (
+    value === '127.0.0.1' ||
+    value === '::1' ||
+    value === '::ffff:127.0.0.1' ||
+    value.startsWith('192.168.') ||
+    value.startsWith('10.') ||
+    value.startsWith('172.16.') ||
+    value.startsWith('172.17.') ||
+    value.startsWith('172.18.') ||
+    value.startsWith('172.19.') ||
+    value.startsWith('172.20.') ||
+    value.startsWith('172.21.') ||
+    value.startsWith('172.22.') ||
+    value.startsWith('172.23.') ||
+    value.startsWith('172.24.') ||
+    value.startsWith('172.25.') ||
+    value.startsWith('172.26.') ||
+    value.startsWith('172.27.') ||
+    value.startsWith('172.28.') ||
+    value.startsWith('172.29.') ||
+    value.startsWith('172.30.') ||
+    value.startsWith('172.31.')
+  )
+}
+
 const parseProxyIps = (req) => {
-  const forwards = []
+  const forwardedIps = []
 
+  // Priority 0: x-user-public-ip (custom header for frontend to send detected public IP)
+  if (req.headers['x-user-public-ip']) {
+    const customIp = String(req.headers['x-user-public-ip']).trim()
+    if (customIp && !isPrivateIP(customIp)) {
+      forwardedIps.push(customIp)
+      console.log('[IP Parse] Using x-user-public-ip header:', customIp)
+    }
+  }
+
+  // Priority 1: x-forwarded-for (most reliable from proxies)
   if (req.headers['x-forwarded-for']) {
-    const headerValue = String(req.headers['x-forwarded-for'])
-    headerValue.split(',').forEach((entry) => {
-      const normalized = normalizeIpRaw(entry)
-      if (normalized) forwards.push(normalized)
-    })
+    // x-forwarded-for may have a comma list of IPs, get each one
+    const list = String(req.headers['x-forwarded-for']).split(',').map((ip) => ip.trim()).filter(Boolean)
+    forwardedIps.push(...list)
   }
 
-  if (req.headers['x-real-ip']) {
-    const normalized = normalizeIpRaw(req.headers['x-real-ip'])
-    if (normalized) forwards.push(normalized)
+  // Priority 2: Other proxy headers (cf-connecting-ip, x-real-ip)
+  const extraHeaders = ['cf-connecting-ip', 'x-real-ip', 'x-client-ip']
+  for (const header of extraHeaders) {
+    if (req.headers[header]) {
+      forwardedIps.push(String(req.headers[header]).trim())
+    }
   }
 
-  if (req.headers['cf-connecting-ip']) {
-    const normalized = normalizeIpRaw(req.headers['cf-connecting-ip'])
-    if (normalized) forwards.push(normalized)
-  }
-
-  if (req.ip) {
-    const normalized = normalizeIpRaw(req.ip)
-    if (normalized) forwards.push(normalized)
+  // Priority 3: Socket/connection remoteAddress
+  if (req.socket?.remoteAddress) {
+    forwardedIps.push(String(req.socket.remoteAddress).trim())
   }
 
   if (req.connection?.remoteAddress) {
-    const normalized = normalizeIpRaw(req.connection.remoteAddress)
-    if (normalized) forwards.push(normalized)
+    forwardedIps.push(String(req.connection.remoteAddress).trim())
   }
 
-  if (req.socket?.remoteAddress) {
-    const normalized = normalizeIpRaw(req.socket.remoteAddress)
-    if (normalized) forwards.push(normalized)
+  // Priority 4: req.ip (set by Express)
+  if (req.ip) {
+    forwardedIps.push(String(req.ip).trim())
   }
 
-  // Deduplicate multiple writes
-  return [...new Set(forwards)]
+  // Normalize all IPs
+  const normalizedIps = forwardedIps.map(normalizeIpRaw).filter(Boolean)
+  
+  // Remove duplicates while preserving order
+  return [...new Set(normalizedIps)]
 }
 
-export const getRequestIp = (req) => {
-  try {
-    const ips = parseProxyIps(req)
-    const ip = ips.length ? ips[0] : null
-
-    if (!ip) {
-      console.warn('[getRequestIp] No IP found in any header or socket')
-      return null
-    }
-
-    console.log('Extracted IP:', ip)
-    console.log('x-forwarded-for:', req.headers['x-forwarded-for'])
-    console.log('req.ip:', req.ip)
-    console.log('[getRequestIp] Parsed IPs:', ips)
-
-    return ip
-  } catch (error) {
-    console.error('[getRequestIp] Error extracting IP:', error.message)
-    return null
-  }
+const getClientIP = (req) => {
+  const ips = parseProxyIps(req)
+  return ips.length ? ips[0] : ''
 }
-export const authenticateToken = async (req, res, next) => {
+
+// Alias for legacy auto-add API use
+const getHeaderIP = getClientIP;
+
+const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization']
     const token = authHeader && authHeader.split(' ')[1]
@@ -141,18 +165,102 @@ export const authenticateToken = async (req, res, next) => {
 }
 
 // =======================
+// DYNAMIC IP HANDLING
+// =======================
+
+/**
+ * Handle dynamic IP changes - auto-add new IPs when user authenticates with valid token
+ * @param {Object} user - User document from DB
+ * @param {string} requestIp - The current request IP  
+ * @returns {Object} { shouldAllow: boolean, ipWasAdded: boolean, reason: string }
+ */
+const handleDynamicIpChange = async (user, requestIp) => {
+  if (!user || !requestIp) {
+    return { shouldAllow: false, ipWasAdded: false, reason: 'Missing user or IP' }
+  }
+
+  try {
+    const normalizedNewIp = normalizeIpRaw(requestIp)
+    
+    // Don't allow localhost IPs
+    if (isPrivateIP(normalizedNewIp)) {
+      return { shouldAllow: false, ipWasAdded: false, reason: 'Private IP not allowed' }
+    }
+
+    // Check if IP already exists in authorized list
+    const ipExists = (user.authorizedIps || []).some(item => normalizeIpRaw(item.ip) === normalizedNewIp)
+    
+    if (ipExists) {
+      return { shouldAllow: true, ipWasAdded: false, reason: 'IP already authorized' }
+    }
+
+    // Check if auto-add is enabled
+    const ipConfig = user.ipAutoUpdateConfig || {}
+    if (!ipConfig.autoAddNewIPs) {
+      return { shouldAllow: false, ipWasAdded: false, reason: 'Auto-add disabled by user' }
+    }
+
+    // Check if we've hit the limit for auto-added IPs
+    const autoAddedCount = (user.authorizedIps || []).filter(item => item.autoAdded).length
+    if (autoAddedCount >= (ipConfig.maxAutoAddedIPs || 3)) {
+      return { shouldAllow: false, ipWasAdded: false, reason: `Auto-add limit reached (${autoAddedCount}/${ipConfig.maxAutoAddedIPs})` }
+    }
+
+    // AUTO-ADD THE NEW IP
+    console.log(`[Dynamic IP] Auto-adding new IP ${normalizedNewIp} for user ${user.email}`)
+    
+    // Add to authorized IPs
+    user.authorizedIps.push({
+      ip: normalizedNewIp,
+      addedBy: 'system-auto-detect',
+      addedAt: new Date(),
+      autoAdded: true,
+      status: 'approved'
+    })
+
+    // Record in IP history
+    user.ipHistory = user.ipHistory || []
+    user.ipHistory.push({
+      oldIp: null,
+      newIp: normalizedNewIp,
+      changeType: 'auto_added',
+      changedBy: 'system-auto-detect',
+      reason: 'Dynamic IP change detected during authentication',
+      changedAt: new Date()
+    })
+
+    // Update last auto-add timestamp
+    if (!user.ipAutoUpdateConfig) {
+      user.ipAutoUpdateConfig = {}
+    }
+    user.ipAutoUpdateConfig.lastAutoAddedAt = new Date()
+
+    // Save changes
+    await user.save()
+
+    console.log(`[Dynamic IP] ✅ Auto-added IP ${normalizedNewIp} and saved to database`)
+    
+    return { shouldAllow: true, ipWasAdded: true, reason: 'IP auto-added and approved' }
+  } catch (error) {
+    console.error('[Dynamic IP] Error handling dynamic IP change:', error)
+    return { shouldAllow: false, ipWasAdded: false, reason: `Error: ${error.message}` }
+  }
+}
+
+// =======================
 // ROLE GUARDS
 // =======================
 
-export const requireUser = (req, res, next) => {
+const requireUser = (req, res, next) => {
   if (!req.user) {
     return res.status(403).json({ message: 'User access required' })
   }
   next()
 }
 
-export const requireAuthorizedIp = (req, res, next) => {
+const requireAuthorizedIp = async (req, res, next) => {
   if (req.globalAdmin) {
+    console.log("[IP Validation] ✅ BYPASSED for global admin")
     return next()
   }
 
@@ -160,32 +268,74 @@ export const requireAuthorizedIp = (req, res, next) => {
     return res.status(403).json({ message: 'User access required' })
   }
 
-  const requestIp = getRequestIp(req)
-  const requestIps = parseProxyIps(req)
-  const allowedIps = (req.user.authorizedIps || []).map((item) => normalizeIpRaw(item.ip))
+  const requestIPs = parseProxyIps(req)
+  const allowedIPs = (req.user.authorizedIps || []).map((item) => normalizeIpRaw(item.ip))
 
-  console.log('[requireAuthorizedIp] userId:', req.user._id)
-  console.log('[requireAuthorizedIp] user.authorizedIps:', req.user.authorizedIps)
-  console.log('[requireAuthorizedIp] requestIps:', requestIps)
-  console.log('[requireAuthorizedIp] allowedIps:', allowedIps)
+  // ❌ REMOVED: No development bypass - strict IP validation for all environments
+  // All IPs (including localhost) must be manually authorized by global admin
 
-  if (!requestIps.length || allowedIps.length === 0) {
-    return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
+  console.log("[IP Validation] User:", req.user.email)
+  console.log("[IP Validation] Request Headers:", {
+    'x-forwarded-for': req.headers['x-forwarded-for'],
+    'x-real-ip': req.headers['x-real-ip'],
+    'cf-connecting-ip': req.headers['cf-connecting-ip'],
+    'socket.remoteAddress': req.socket?.remoteAddress,
+    'req.ip': req.ip
+  })
+  console.log("[IP Validation] Parsed Request IPs:", requestIPs)
+  console.log("[IP Validation] Allowed IPs:", allowedIPs)
+
+  if (requestIPs.length === 0) {
+    console.log("[IP Validation] ❌ DENIED: No IPs detected from any source")
+    return res.status(403).json({ 
+      message: 'Access Denied – Unauthorized IP', 
+      error: 'Could not extract request IPs' 
+    })
   }
 
-  const hasAllowed = requestIps.some((ip) => allowedIps.includes(ip))
-
-  if (!hasAllowed) {
-    return res.status(403).json({ message: 'Access Denied – Unauthorized IP' })
+  if (allowedIPs.length === 0) {
+    console.log("[IP Validation] ❌ DENIED: User has no authorized IPs configured. Request from IP: ${requestIPs[0]}")
+    return res.status(403).json({ 
+      message: 'Access Denied – Unauthorized IP', 
+      error: 'No authorized IPs configured for this user. Contact admin to configure your public IP.'
+    })
   }
 
-  // Save last request IP for visibility (optional)
-  req.user.lastRequestIp = requestIp
+  // Extract the request IP - prefer public IPs, fallback to first detected
+  const publicIp = requestIPs.find((ip) => !isPrivateIP(ip))
+  const requestIp = publicIp || requestIPs[0]
 
+  // ❌ STRICT: NEVER allow private/localhost IPs to send
+  if (isPrivateIP(requestIp)) {
+    console.log(`[IP Validation] ❌ DENIED: Private/local IP ${requestIp} detected. Public IP required. Hint: Your detected local IP is ${requestIp}. Use your actual public IP configured in Global Admin.`)
+    return res.status(403).json({
+      message: 'Access Denied – Private IP Not Allowed',
+      detectedIp: requestIp,
+      isPrivate: true,
+      allowedIps: allowedIPs,
+      reason: 'Private/local IP (127.0.0.1 or 192.168.x.x) cannot send. Your actual public IP must be registered with Global Admin first.'
+    })
+  }
+
+  // ✅ Public IP: check strict match against authorized list
+  const isAuthorized = allowedIPs.includes(requestIp)
+
+  if (!isAuthorized) {
+    console.log(`[IP Validation] ❌ DENIED: Public IP ${requestIp} not in authorized list ${JSON.stringify(allowedIPs)}`)
+    return res.status(403).json({
+      message: 'Access Denied – Unauthorized IP',
+      detectedIp: requestIp,
+      authorizedIps: allowedIPs,
+      reason: `Current IP ${requestIp} not approved. Request Global Admin to authorize this IP.`
+    })
+  }
+
+  // ✅ SUCCESS: Public IP matches authorized list
+  console.log(`[IP Validation] ✅ ALLOWED: Public IP ${requestIp} is authorized`)
   next()
 }
 
-export const requireGlobalAdmin = (req, res, next) => {
+const requireGlobalAdmin = (req, res, next) => {
   if (!req.globalAdmin) {
     return res.status(403).json({ message: 'Global admin access required' })
   }
@@ -193,14 +343,14 @@ export const requireGlobalAdmin = (req, res, next) => {
 }
 
 // Modified: allow all authenticated users (not just user-admins)
-export const requireUserAdmin = (req, res, next) => {
+const requireUserAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(403).json({ message: 'User access required' })
   }
   next();
 }
 
-export const requireNotepadPasswordVerified = (req, res, next) => {
+const requireNotepadPasswordVerified = (req, res, next) => {
   // Skip password check if user is global admin (they bypass all protections)
   if (req.globalAdmin) {
     return next()
@@ -220,7 +370,7 @@ export const requireNotepadPasswordVerified = (req, res, next) => {
 }
 
 // Premium access check - for User Admin Dashboard and premium features
-export const requirePremiumAccess = async (req, res, next) => {
+const requirePremiumAccess = async (req, res, next) => {
   try {
     // Global admins always have access to all features
     if (req.globalAdmin) {
@@ -254,6 +404,22 @@ export const requirePremiumAccess = async (req, res, next) => {
     console.error('Premium access check error:', error)
     return res.status(500).json({ message: 'Error checking premium access' })
   }
+}
+
+module.exports = {
+  authenticateToken,
+  requireUser,
+  requireAuthorizedIp,
+  requireGlobalAdmin,
+  requireUserAdmin,
+  requireNotepadPasswordVerified,
+  requirePremiumAccess,
+  getClientIP,
+  getHeaderIP,
+  parseProxyIps,
+  normalizeIpRaw,
+  isPrivateIP,
+  handleDynamicIpChange
 }
 
 

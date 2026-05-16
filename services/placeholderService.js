@@ -1,4 +1,4 @@
-import { DateTime } from 'luxon';
+const { DateTime } = require('luxon');
 
 /**
  * Dynamic Placeholder/Merge Tag System
@@ -317,4 +317,4 @@ const placeholderService = {
   }
 };
 
-export default placeholderService;
+module.exports = placeholderService;

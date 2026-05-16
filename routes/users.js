@@ -1,9 +1,9 @@
-import express from 'express'
-import multer from 'multer'
-import bcrypt from 'bcryptjs'
-import { v2 as cloudinary } from 'cloudinary'
-import User from '../models/User.js'
-import { authenticateToken, requireUser } from '../middleware/auth.js'
+const express = require('express')
+const multer = require('multer')
+const bcrypt = require('bcryptjs')
+const { v2: cloudinary } = require('cloudinary')
+const User = require('../models/User.js')
+const { authenticateToken, requireUser } = require('../middleware/auth.js')
 
 const router = express.Router()
 
@@ -101,7 +101,7 @@ router.put('/change-password', authenticateToken, requireUser, async (req, res) 
   }
 })
 
-export default router
+module.exports = router
 
 
 

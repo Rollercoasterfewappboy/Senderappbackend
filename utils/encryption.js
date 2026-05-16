@@ -2,23 +2,23 @@
 // and the BANK_ENCRYPTION_KEY environment variable is no longer used.
 // This keeps the API stable but entirely bypasses crypto.
 
-export const encryptText = (plaintext) => {
+const encryptText = (plaintext) => {
   // preserve null/undefined semantics
   if (plaintext === null || typeof plaintext === 'undefined') return null
   return String(plaintext)
 }
 
-export const decryptText = (payload) => {
+const decryptText = (payload) => {
   // simply return whatever was passed (handles null/undefined too)
   return payload
 }
 
-export const isEncrypted = (_payload) => {
+const isEncrypted = (_payload) => {
   // nothing is ever considered encrypted now
   return false
 }
 
-export const maskValue = (value) => {
+const maskValue = (value) => {
   try {
     if (!value) return ''
     const s = String(value)
@@ -30,7 +30,7 @@ export const maskValue = (value) => {
   }
 }
 
-export const getMaskedBankDetails = (encryptedBankDetails = {}) => {
+const getMaskedBankDetails = (encryptedBankDetails = {}) => {
   if (!encryptedBankDetails) return {}
   const out = {}
   for (const [k, v] of Object.entries(encryptedBankDetails)) {
@@ -49,7 +49,7 @@ export const getMaskedBankDetails = (encryptedBankDetails = {}) => {
 // PAYSTACK CREDENTIAL ENCRYPTION
 // =====================
 
-export const encryptPaystackCredentials = (publicKey, secretKey) => {
+const encryptPaystackCredentials = (publicKey, secretKey) => {
   if (!publicKey || !secretKey) return null
   return {
     publicKey,
@@ -59,7 +59,7 @@ export const encryptPaystackCredentials = (publicKey, secretKey) => {
   }
 }
 
-export const decryptPaystackSecret = (encryptedSecret) => {
+const decryptPaystackSecret = (encryptedSecret) => {
   if (!encryptedSecret) return null
   return encryptedSecret
 }
@@ -68,7 +68,7 @@ export const decryptPaystackSecret = (encryptedSecret) => {
 // TELEGRAM CREDENTIAL ENCRYPTION
 // =====================
 
-export const encryptTelegramCredentials = (botToken, chatId) => {
+const encryptTelegramCredentials = (botToken, chatId) => {
   if (!botToken || !chatId) return null
   return {
     botToken,
@@ -78,7 +78,7 @@ export const encryptTelegramCredentials = (botToken, chatId) => {
   }
 }
 
-export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) => {
+const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) => {
   if (!encryptedBotToken || !encryptedChatId) return null
   return {
     botToken: encryptedBotToken,
@@ -117,7 +117,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 //   }
 // }
 
-// export const encryptText = (plaintext) => {
+// const encryptText = (plaintext) => {
 //   if (plaintext === null || typeof plaintext === 'undefined') return null
 //   const key = getKey()
 //   if (!key || key.length !== 32) throw new Error('Invalid BANK_ENCRYPTION_KEY; must be 32 bytes (base64)')
@@ -131,7 +131,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 //   return Buffer.concat([iv, tag, encrypted]).toString('base64')
 // }
 
-// export const decryptText = (payload) => {
+// const decryptText = (payload) => {
 //   if (!payload) return null
 //   const key = getKey()
 //   if (!key || key.length !== 32) throw new Error('Invalid BANK_ENCRYPTION_KEY; must be 32 bytes (base64)')
@@ -189,7 +189,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 // }
 
 // // Helper: Check if a string appears to be valid encrypted data (base64, correct length)
-// export const isEncrypted = (payload) => {
+// const isEncrypted = (payload) => {
 //   if (!payload || typeof payload !== 'string') return false
 //   try {
 //     const data = Buffer.from(payload, 'base64')
@@ -201,7 +201,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 // }
 
 // // Mask value for display: keep last 4 characters if possible
-// export const maskValue = (value) => {
+// const maskValue = (value) => {
 //   try {
 //     if (!value) return ''
 //     const s = String(value)
@@ -214,7 +214,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 // }
 
 // // Decrypt object fields and return masked object
-// export const getMaskedBankDetails = (encryptedBankDetails = {}) => {
+// const getMaskedBankDetails = (encryptedBankDetails = {}) => {
 //   if (!encryptedBankDetails) return {}
 //   const out = {}
 //   for (const [k, v] of Object.entries(encryptedBankDetails)) {
@@ -233,7 +233,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 // // PAYSTACK CREDENTIAL ENCRYPTION
 // // =====================
 
-// export const encryptPaystackCredentials = (publicKey, secretKey) => {
+// const encryptPaystackCredentials = (publicKey, secretKey) => {
 //   if (!publicKey || !secretKey) return null
 //   try {
 //     return {
@@ -248,7 +248,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 //   }
 // }
 
-// export const decryptPaystackSecret = (encryptedSecret) => {
+// const decryptPaystackSecret = (encryptedSecret) => {
 //   if (!encryptedSecret) return null
 //   try {
 //     return decryptText(encryptedSecret)
@@ -262,7 +262,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 // // TELEGRAM CREDENTIAL ENCRYPTION
 // // =====================
 
-// export const encryptTelegramCredentials = (botToken, chatId) => {
+// const encryptTelegramCredentials = (botToken, chatId) => {
 //   if (!botToken || !chatId) return null
 //   try {
 //     return {
@@ -277,7 +277,7 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 //   }
 // }
 
-// export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) => {
+// const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) => {
 //   if (!encryptedBotToken || !encryptedChatId) return null
 //   try {
 //     return {
@@ -289,4 +289,3 @@ export const decryptTelegramCredentials = (encryptedBotToken, encryptedChatId) =
 //     throw new Error('Failed to decrypt notification credentials')
 //   }
 // }
-

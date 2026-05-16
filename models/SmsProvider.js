@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const SmsProviderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -16,4 +16,4 @@ const SmsProviderSchema = new mongoose.Schema({
   credentials: { type: mongoose.Schema.Types.Mixed },
 }, { timestamps: true });
 
-export default mongoose.model('SmsProvider', SmsProviderSchema);
+module.exports = mongoose.model('SmsProvider', SmsProviderSchema);

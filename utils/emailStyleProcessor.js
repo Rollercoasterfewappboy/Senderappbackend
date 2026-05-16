@@ -10,7 +10,7 @@
  * @param {string} html - HTML content
  * @returns {string} - HTML with style blocks removed
  */
-export function removeStyleBlocks(html) {
+function removeStyleBlocks(html) {
   if (!html || typeof html !== 'string') {
     return html;
   }
@@ -33,7 +33,7 @@ export function removeStyleBlocks(html) {
  * @param {string} html - HTML content
  * @returns {string} - HTML with email-safe styles
  */
-export function ensureEmailSafeStyles(html) {
+function ensureEmailSafeStyles(html) {
   if (!html || typeof html !== 'string') {
     return html;
   }
@@ -73,7 +73,7 @@ export function ensureEmailSafeStyles(html) {
  * @param {string} html - HTML content
  * @returns {object} - Validation result
  */
-export function validateEmailCss(html) {
+function validateEmailCss(html) {
   if (!html || typeof html !== 'string') {
     return { valid: true, issues: [] };
   }
@@ -123,7 +123,7 @@ export function validateEmailCss(html) {
  * @param {string} html - HTML content
  * @returns {object} - Processed HTML and validation results
  */
-export function processHtmlForEmail(html) {
+function processHtmlForEmail(html) {
   if (!html || typeof html !== 'string') {
     return { 
       html: '', 
@@ -146,7 +146,7 @@ export function processHtmlForEmail(html) {
   };
 }
 
-export default {
+module.exports = {
   removeStyleBlocks,
   ensureEmailSafeStyles,
   validateEmailCss,

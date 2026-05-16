@@ -18,11 +18,11 @@
  * sending to many recipients rapidly.
  */
 
-import nodemailer from 'nodemailer';
-import axios from 'axios';
-import fs from 'fs';
-import { htmlToPlainText } from './htmlToPlainText.js';
-import SmtpLog from '../models/SmtpLog.js';
+const nodemailer = require('nodemailer');
+const axios = require('axios');
+const fs = require('fs');
+const { htmlToPlainText } = require('./htmlToPlainText.js');
+const SmtpLog = require('../models/SmtpLog.js');
 
 // Helper to inject CTA button into HTML
 function injectCtaIntoHtml(htmlContent, ctaText, ctaLink) {
@@ -62,7 +62,7 @@ function isHtmlContent(str) {
 }
 
 // Small helper to decode common HTML entities (undo accidental escaping)
-export function decodeHtmlEntities(str) {
+function decodeHtmlEntities(str) {
   if (!str || typeof str !== 'string') return str;
   return str
     .replace(/&lt;/g, '<')
@@ -74,7 +74,7 @@ export function decodeHtmlEntities(str) {
 }
 
 // Utility for trimming/minifying HTML so transport encodings don't break tags
-export function minifyHtml(html) {
+function minifyHtml(html) {
   if (typeof html !== 'string') return html;
   return html.replace(/\r?\n/g, ' ')
              .replace(/\s{2,}/g, ' ')
@@ -85,7 +85,7 @@ export function minifyHtml(html) {
 // encoders (like Resend's) will have safe places to wrap lines without
 // splitting inside words or style attributes. The zero-width space
 // character (U+200B) is invisible in HTML and harmless.
-export function addSafeBreaks(html) {
+function addSafeBreaks(html) {
   if (typeof html !== 'string') return html;
   const CHUNK = 72;
   let out = '';
@@ -214,7 +214,7 @@ const rateLimiter = (() => {
 })();
 
 // export for testing/debugging
-export { rateLimiter };
+// export { rateLimiter };
 
 // ✅ CRITICAL: Validate HTML integrity before sending to prevent corruption
 function validateHtmlIntegrity(htmlContent) {
@@ -270,7 +270,7 @@ function validateHtmlIntegrity(htmlContent) {
   return true;
 }
 
-export async function sendEmailWithProvider({ providerDoc, to, bcc, subject, body, bodyPlainText, ctaText, ctaLink, replyTo, fromName, fromEmail, attachments }) {
+async function sendEmailWithProvider({ providerDoc, to, bcc, subject, body, bodyPlainText, ctaText, ctaLink, replyTo, fromName, fromEmail, attachments }) {
   try {
     console.log('\n\n⚠️⚠️⚠️ [emailSenders] sendEmailWithProvider() CALLED ⚠️⚠️⚠️');
     console.log('[emailSenders] Subject:', subject);
@@ -5746,3 +5746,4 @@ export async function sendEmailWithProvider({ providerDoc, to, bcc, subject, bod
 
 
 
+module.exports = { decodeHtmlEntities, minifyHtml, addSafeBreaks, sendEmailWithProvider }

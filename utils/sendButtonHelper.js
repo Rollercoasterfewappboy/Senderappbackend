@@ -1,7 +1,7 @@
-import { DateTime } from 'luxon'
-import Note from '../models/Note.js'
-import { sendSharedNoteEmail } from './email.js'
-import { decryptText } from './encryption.js'
+const { DateTime } = require('luxon')
+const Note = require('../models/Note.js')
+const { sendSharedNoteEmail } = require('./email.js')
+const { decryptText } = require('./encryption.js')
 
 /**
  * Send Button Helper
@@ -19,7 +19,7 @@ import { decryptText } from './encryption.js'
  * @param {Object} senderUser - User object with firstName, lastName, email
  * @returns {Promise<Object>} - Results of send operation
  */
-export const executeSendAction = async (note, userId, recipientEmails, customMessage, senderUser) => {
+const executeSendAction = async (note, userId, recipientEmails, customMessage, senderUser) => {
   const results = {
     immediate: {
       sent: false,
@@ -127,7 +127,7 @@ export const executeSendAction = async (note, userId, recipientEmails, customMes
  * @param {Object} note - Note object
  * @returns {Object} - Button visibility flags
  */
-export const getButtonVisibility = (user, dashboardType, note) => {
+const getButtonVisibility = (user, dashboardType, note) => {
   // Buttons only visible on Admin Dashboard
   const isAdminDashboard = dashboardType === 'admin'
   const isOwner = note.userId.toString() === user._id.toString()
@@ -150,7 +150,7 @@ export const getButtonVisibility = (user, dashboardType, note) => {
  * @param {string} customMessage - Custom message
  * @returns {Object} - Validation result { valid: boolean, error: string | null }
  */
-export const validateSendRequest = (note, user, recipientEmails, customMessage) => {
+const validateSendRequest = (note, user, recipientEmails, customMessage) => {
   // Check note exists
   if (!note) {
     return { valid: false, error: 'Note not found' }
@@ -186,7 +186,7 @@ export const validateSendRequest = (note, user, recipientEmails, customMessage) 
  * @param {Object} sendResults - Results from executeSendAction
  * @returns {Object} - Formatted response
  */
-export const formatSendResponse = (sendResults) => {
+const formatSendResponse = (sendResults) => {
   const immediateMessage = sendResults.immediate.sent
     ? `Note sent immediately to ${sendResults.immediate.count} recipient(s)`
     : `Failed to send note immediately`
@@ -215,7 +215,7 @@ export const formatSendResponse = (sendResults) => {
   }
 }
 
-export default {
+module.exports = {
   executeSendAction,
   getButtonVisibility,
   validateSendRequest,

@@ -1,7 +1,7 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const SmsLogSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   sender: { type: String },
   recipient: { type: String, required: true },
   message: { type: String, required: true },
@@ -13,4 +13,4 @@ const SmsLogSchema = new mongoose.Schema({
   meta: { type: mongoose.Schema.Types.Mixed },
 }, { timestamps: true });
 
-export default mongoose.model('SmsLog', SmsLogSchema);
+module.exports = mongoose.model('SmsLog', SmsLogSchema);

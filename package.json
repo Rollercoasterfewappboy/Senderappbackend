@@ -1,12 +1,12 @@
 {
-  "name": "marketbook-backend",
+  "name": "inboxguaranteed-backend",
   "version": "1.0.0",
-  "description": "Backend for Marketbook Solution",
-  "main": "server.js",
-  "type": "module",
+  "description": "Backend for InboxGuaranteed",
+  "main": "server.cjs",
+  "bin": "server.cjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node server.cjs",
+    "dev": "nodemon server.cjs",
     "test": "vitest"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
     "nodemailer": "^6.9.7",
+    "puppeteer-core": "^21.11.0",
     "resend": "^6.3.0",
     "sanitize-html": "^2.17.1",
     "socket.io": "^4.7.4",

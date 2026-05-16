@@ -11,8 +11,8 @@
  * 4. The auth tag validation works correctly
  */
 
-import crypto from 'crypto'
-import { encryptText, decryptText, maskValue, getMaskedBankDetails } from './utils/encryption.js'
+const crypto = require('crypto')
+const { encryptText, decryptText, maskValue, getMaskedBankDetails } = require('./utils/encryption.js')
 
 const ALGO = 'aes-256-gcm'
 const IV_LENGTH = 12

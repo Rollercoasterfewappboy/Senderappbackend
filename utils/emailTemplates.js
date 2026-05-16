@@ -23,7 +23,7 @@ function isCompleteHtmlDocument(html) {
  * Extract just the body content from a complete HTML document
  * Returns the content between <body> and </body> tags
  */
-export function extractBodyContent(html) {
+function extractBodyContent(html) {
   if (!html || typeof html !== 'string') return html;
   
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -47,7 +47,7 @@ export function extractBodyContent(html) {
  * @param {string} content - The email content (partial HTML or complete document)
  * @returns {string} - Complete, email-safe HTML document
  */
-export function generateProfessionalEmailTemplate(content = '') {
+function generateProfessionalEmailTemplate(content = '') {
   // If the content is already a complete HTML document, send it as-is
   // No wrapping needed - it already has proper structure
   if (isCompleteHtmlDocument(content)) {
@@ -127,7 +127,7 @@ export function generateProfessionalEmailTemplate(content = '') {
  * @param {object} options - Styling options
  * @returns {string} - Email-safe button HTML
  */
-export function generateEmailButton(text, url, options = {}) {
+function generateEmailButton(text, url, options = {}) {
   const {
     backgroundColor = '#0066cc',
     textColor = '#ffffff',
@@ -156,7 +156,7 @@ export function generateEmailButton(text, url, options = {}) {
  * @param {object} options - Styling options
  * @returns {string} - Email-safe divider HTML
  */
-export function generateEmailDivider(options = {}) {
+function generateEmailDivider(options = {}) {
   const {
     color = '#cccccc',
     height = '1px',
@@ -181,7 +181,7 @@ export function generateEmailDivider(options = {}) {
  * @param {string} styleString - CSS style string
  * @returns {string} - Sanitized style string
  */
-export function sanitizeInlineStyles(styleString) {
+function sanitizeInlineStyles(styleString) {
   if (!styleString || typeof styleString !== 'string') {
     return '';
   }
@@ -235,7 +235,7 @@ export function sanitizeInlineStyles(styleString) {
  * @param {string} html - HTML with div-based layout
  * @returns {string} - HTML with table-based layout
  */
-export function convertDivsToTables(html) {
+function convertDivsToTables(html) {
   if (!html || typeof html !== 'string') {
     return html;
   }
@@ -256,7 +256,7 @@ export function convertDivsToTables(html) {
  * @param {string} html - HTML content to validate
  * @returns {object} - Validation result with issues found
  */
-export function validateEmailHtml(html) {
+function validateEmailHtml(html) {
   const issues = [];
 
   if (!html || typeof html !== 'string') {
@@ -325,7 +325,7 @@ export function validateEmailHtml(html) {
   };
 }
 
-export default {
+module.exports = {
   generateProfessionalEmailTemplate,
   generateEmailButton,
   generateEmailDivider,

@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const EmailLogSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -14,9 +14,9 @@ const EmailLogSchema = new mongoose.Schema({
   fromName: String,
   provider: String,
   smtpUsed: String,
-  status: { type: String, enum: ['Success', 'Failed', 'Pending', 'Processing'], default: 'Success' },
+  status: { type: String, enum: ['Success', 'Failed'], default: 'Success' },
   error: String,
   sentAt: { type: Date, default: Date.now },
 });
 
-export default mongoose.model('EmailLog', EmailLogSchema);
+module.exports = mongoose.model('EmailLog', EmailLogSchema);

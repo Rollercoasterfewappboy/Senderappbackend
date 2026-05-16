@@ -1,4 +1,4 @@
-import { rateLimiter } from './emailSenders.js';
+const { rateLimiter } = require('./emailSenders.js');
 
 // simple demonstration: schedule five quick tasks and log timestamps
 async function demo() {

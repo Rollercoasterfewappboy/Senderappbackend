@@ -1,5 +1,5 @@
-import mongoose from 'mongoose'
-import bcrypt from 'bcryptjs'
+const mongoose = require('mongoose')
+const bcrypt = require('bcryptjs')
 
 const userSchema = new mongoose.Schema({
   firstName: {
@@ -165,10 +165,87 @@ const userSchema = new mongoose.Schema({
     }
   },
   authorizedIps: [{
-    ip: { type: String, required: true },
-    addedBy: { type: String, default: 'global-admin' },
-    addedAt: { type: Date, default: Date.now }
-  }]
+    ip: {
+      type: String,
+      required: true
+    },
+    addedBy: {
+      type: String,
+      required: true
+    },
+    addedAt: {
+      type: Date,
+      default: Date.now
+    },
+    // Flag: whether this IP was automatically added by system (vs manually by admin)
+    autoAdded: {
+      type: Boolean,
+      default: false
+    },
+    // Status: 'approved' (default) or 'pending' (awaiting admin review)
+    status: {
+      type: String,
+      enum: ['approved', 'pending'],
+      default: 'approved'
+    }
+  }],
+  // Track IP changes for audit trail and admin review
+  ipHistory: [{
+    oldIp: {
+      type: String,
+      default: null
+    },
+    newIp: {
+      type: String,
+      required: true
+    },
+    changeType: {
+      // 'added' = new IP was added
+      // 'updated' = existing IP was replaced with new one
+      // 'auto_added' = system automatically added new IP
+      // 'removed' = IP was removed
+      // 'approved' = pending IP was approved by admin
+      // 'rejected' = pending IP was rejected by admin
+      type: String,
+      enum: ['added', 'updated', 'auto_added', 'removed', 'approved', 'rejected'],
+      required: true
+    },
+    changedBy: {
+      type: String,
+      required: true
+    },
+    reason: {
+      type: String,
+      default: null
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Configuration for automatic IP handling
+  ipAutoUpdateConfig: {
+    // Whether to auto-add new IPs on authenticated requests
+    autoAddNewIPs: {
+      type: Boolean,
+      default: true
+    },
+    // Maximum number of auto-added IPs before requiring admin approval
+    maxAutoAddedIPs: {
+      type: Number,
+      default: 3
+    },
+    // Whether to send user notification when IP is auto-added
+    notifyOnAutoAdd: {
+      type: Boolean,
+      default: true
+    },
+    // Last time a new IP was auto-added
+    lastAutoAddedAt: {
+      type: Date,
+      default: null
+    }
+  }
 }, {
   timestamps: true
 })
@@ -238,7 +315,7 @@ userSchema.set('toJSON', {
   }
 })
 
-export default mongoose.model('User', userSchema)
+module.exports = mongoose.model('User', userSchema)
 
 
 

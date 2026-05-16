@@ -1,6 +1,6 @@
-import axios from 'axios';
+const axios = require('axios');
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'https://senderappbackend.onrender.com/api';
 
 // Test endpoints that might consume memory or create recurring tasks
 const endpoints = [

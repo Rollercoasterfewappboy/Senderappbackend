@@ -1,5 +1,5 @@
-import axios from 'axios';
-import SmsLog from '../models/SmsLog.js';
+const axios = require('axios');
+const SmsLog = require('../models/SmsLog.js');
 
 // Normalize phone: basic normalization: remove spaces, ensure leading +
 function normalizePhone(phone, defaultCountry) {
@@ -7,37 +7,46 @@ function normalizePhone(phone, defaultCountry) {
   let p = String(phone).trim();
   p = p.replace(/[\s\-()]/g, '');
   if (!p.startsWith('+')) {
+    // If starts with 00 convert to +
     if (p.startsWith('00')) p = '+' + p.slice(2);
     else p = (defaultCountry || '+1') + p.replace(/^\+/, '');
   }
   return p;
 }
 
-export async function sendSmsWithProvider({ providerDoc, to, message, userId, onProgress }) {
+async function sendSmsWithProvider({ providerDoc, to, message, userId, onProgress }) {
+  // to: array of normalized phone numbers
+  // onProgress: optional callback(data) for real-time progress updates
   try {
     if (!providerDoc || !providerDoc.enabled) throw new Error('No SMS provider configured');
     const provider = providerDoc.provider;
     if (!Array.isArray(to)) to = [to];
 
     const results = [];
-    let sentCount = 0;
-    let failedCount = 0;
-
-    for (let index = 0; index < to.length; index += 1) {
-      const recipient = to[index];
+    for (const recipient of to) {
       const log = new SmsLog({ userId, sender: providerDoc.senderValue || '', recipient, message, provider: providerDoc.provider, status: 'Pending' });
       await log.save();
 
-      let progressResult = {
-        recipient,
-        success: false,
-        error: null,
-        providerMessageId: null,
-        index: index + 1,
-        sent: sentCount,
-        failed: failedCount,
-        pending: to.length - (sentCount + failedCount),
-      };
+      // Emit 'sending' status immediately before attempting provider call
+      if (onProgress) {
+        try {
+          onProgress({
+            total: to.length,
+            successful: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+            remaining: to.length - results.length,
+            last: {
+              recipient,
+              status: 'sending',
+              message: message.substring(0, 120),
+              provider: providerDoc.provider,
+              sentAt: new Date().toISOString(),
+            },
+          });
+        } catch (e) {
+          console.warn('[smsProviders] onProgress send failed (sending):', e.message || e);
+        }
+      }
 
       try {
         if (provider === 'twilio') {
@@ -45,6 +54,7 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId, on
           if (!accountSid || !authToken) throw new Error('Twilio credentials missing');
           const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
           const params = new URLSearchParams();
+          // Use senderValue if alphanumeric type, otherwise use phone number from credentials
           const fromValue = providerDoc.senderType === 'alphanumeric' ? providerDoc.senderValue : (from || providerDoc.senderValue || '');
           params.append('From', fromValue);
           params.append('To', recipient);
@@ -61,35 +71,49 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId, on
           log.providerMessageId = res.data.sid;
           log.meta = res.data;
           await log.save();
-          sentCount += 1;
-          progressResult = {
-            recipient,
-            success: true,
-            error: null,
-            providerMessageId: res.data.sid,
-            index: index + 1,
-            sent: sentCount,
-            failed: failedCount,
-            pending: to.length - (sentCount + failedCount),
-          };
           results.push({ recipient, success: true, id: res.data.sid });
+          // Emit progress if callback provided
+          if (onProgress) {
+            onProgress({
+              total: to.length,
+              successful: results.filter(r => r.success).length,
+              failed: results.filter(r => !r.success).length,
+              remaining: to.length - results.length,
+              last: {
+                recipient,
+                success: true,
+                id: res.data.sid,
+                message: message.substring(0, 120),
+                provider: providerDoc.provider,
+                sentAt: new Date().toISOString(),
+              },
+            });
+          }
         } else if (provider === 'mock' || !provider) {
+          // Mock provider for development
           log.status = 'Sent';
           log.providerMessageId = `mock-${Date.now()}`;
           await log.save();
-          sentCount += 1;
-          progressResult = {
-            recipient,
-            success: true,
-            error: null,
-            providerMessageId: log.providerMessageId,
-            index: index + 1,
-            sent: sentCount,
-            failed: failedCount,
-            pending: to.length - (sentCount + failedCount),
-          };
           results.push({ recipient, success: true, id: log.providerMessageId });
+          // Emit progress if callback provided
+          if (onProgress) {
+            onProgress({
+              total: to.length,
+              successful: results.filter(r => r.success).length,
+              failed: results.filter(r => !r.success).length,
+              remaining: to.length - results.length,
+              last: {
+                recipient,
+                success: true,
+                id: log.providerMessageId,
+                message: message.substring(0, 120),
+                provider: providerDoc.provider,
+                sentAt: new Date().toISOString(),
+              },
+            });
+          }
         } else {
+          // Generic HTTP POST: custom provider must provide a sendUrl and method in credentials
           const { sendUrl, apiKey, method = 'POST', bodyField = 'body', toField = 'to', fromField = 'from' } = providerDoc.credentials || {};
           if (!sendUrl) throw new Error('Custom provider not configured');
           const payload = {};
@@ -101,21 +125,29 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId, on
           log.providerMessageId = res.data?.messageId || res.data?.id || `custom-${Date.now()}`;
           log.meta = res.data;
           await log.save();
-          sentCount += 1;
-          progressResult = {
-            recipient,
-            success: true,
-            error: null,
-            providerMessageId: log.providerMessageId,
-            index: index + 1,
-            sent: sentCount,
-            failed: failedCount,
-            pending: to.length - (sentCount + failedCount),
-          };
           results.push({ recipient, success: true, id: log.providerMessageId });
+          // Emit progress if callback provided
+          if (onProgress) {
+            onProgress({
+              total: to.length,
+              successful: results.filter(r => r.success).length,
+              failed: results.filter(r => !r.success).length,
+              remaining: to.length - results.length,
+              last: {
+                recipient,
+                success: true,
+                id: log.providerMessageId,
+                message: message.substring(0, 120),
+                provider: providerDoc.provider,
+                sentAt: new Date().toISOString(),
+              },
+            });
+          }
         }
       } catch (err) {
         log.status = 'Failed';
+        
+        // Better error logging: capture Twilio API error response if available
         let errorDetail = err.message;
         if (err.response?.data) {
           const errorData = err.response.data;
@@ -124,26 +156,28 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId, on
         } else {
           console.error(`[SMS Error] ${errorDetail}`);
         }
-
+        
         log.error = errorDetail;
         log.attempts = (log.attempts || 0) + 1;
         await log.save();
-        failedCount += 1;
-        progressResult = {
-          recipient,
-          success: false,
-          error: errorDetail,
-          providerMessageId: null,
-          index: index + 1,
-          sent: sentCount,
-          failed: failedCount,
-          pending: to.length - (sentCount + failedCount),
-        };
         results.push({ recipient, success: false, error: errorDetail });
-      }
-
-      if (typeof onProgress === 'function') {
-        onProgress(progressResult);
+        // Emit progress even on failure
+        if (onProgress) {
+          onProgress({
+            total: to.length,
+            successful: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+            remaining: to.length - results.length,
+            last: {
+              recipient,
+              success: false,
+              error: errorDetail,
+              message: message.substring(0, 120),
+              provider: providerDoc.provider,
+              sentAt: new Date().toISOString(),
+            },
+          });
+        }
       }
     }
 
@@ -154,4 +188,7 @@ export async function sendSmsWithProvider({ providerDoc, to, message, userId, on
   }
 }
 
-export { normalizePhone };
+module.exports = {
+  sendSmsWithProvider,
+  normalizePhone
+};

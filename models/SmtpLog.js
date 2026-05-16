@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const SmtpLogSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -14,4 +14,4 @@ const SmtpLogSchema = new mongoose.Schema({
 
 SmtpLogSchema.index({ userId: 1, createdAt: -1 });
 
-export default mongoose.model('SmtpLog', SmtpLogSchema);
+module.exports = mongoose.model('SmtpLog', SmtpLogSchema);

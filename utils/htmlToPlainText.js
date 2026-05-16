@@ -1,10 +1,10 @@
-import { htmlToText as htmlToTextLib } from 'html-to-text';
+const { htmlToText: htmlToTextLib } = require('html-to-text');
 
 /**
  * Robust HTML to Plain Text conversion using `html-to-text` with a safe fallback.
  * This is the professional-grade conversion used before sending multipart emails.
  */
-export function htmlToPlainText(html) {
+function htmlToPlainText(html) {
   if (!html) return '';
 
   try {
@@ -126,3 +126,5 @@ function decodeHtmlEntities(text) {
 
   return decoded;
 }
+
+module.exports = { htmlToPlainText }

@@ -1,4 +1,4 @@
-import sanitizeHtml from 'sanitize-html';
+const sanitizeHtml = require('sanitize-html');
 
 /**
  * ✅ PROFESSIONAL HTML-TO-TEXT CONVERSION FOR BACKEND
@@ -221,7 +221,7 @@ const EMAIL_CONFIG = {
  * @param {string} html - HTML content to sanitize
  * @returns {string} - Sanitized HTML safe for display
  */
-export function sanitizeHtmlForDisplay(html) {
+function sanitizeHtmlForDisplay(html) {
   if (!html || typeof html !== 'string') {
     return '';
   }
@@ -240,7 +240,7 @@ export function sanitizeHtmlForDisplay(html) {
  * @param {string} html - HTML content to sanitize
  * @returns {string} - Sanitized HTML safe for email delivery
  */
-export function sanitizeHtmlForEmail(html) {
+function sanitizeHtmlForEmail(html) {
   // ⚠️ DEPRECATED: sanitization of email HTML introduces the very bugs
   // described in the critical rendering fix docs.  The email system now
   // relies on raw HTML output from templates and other helpers.  This helper
@@ -258,7 +258,7 @@ export function sanitizeHtmlForEmail(html) {
  * @param {string} html - HTML content to validate
  * @returns {boolean} - True if HTML is safe
  */
-export function isHtmlSafe(html) {
+function isHtmlSafe(html) {
   if (!html || typeof html !== 'string') {
     return true;
   }
@@ -279,11 +279,7 @@ export function isHtmlSafe(html) {
   return !dangerousPatterns.some(pattern => pattern.test(html));
 }
 
-export {
-  htmlToPlainText
-};
-
-export default {
+module.exports = {
   sanitizeHtmlForDisplay,
   sanitizeHtmlForEmail,
   isHtmlSafe,

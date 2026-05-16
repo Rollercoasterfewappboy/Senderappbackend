@@ -1,23 +1,23 @@
-import express from 'express'
-import Note from '../models/Note.js'
-import { authenticateToken, requireUser, requireUserAdmin } from '../middleware/auth.js'
-import { sendEmailWithProvider } from '../utils/emailSenders.js'
-import EmailProvider from '../models/EmailProvider.js'
-import { encryptText, decryptText } from '../utils/encryption.js'
-import { DateTime } from 'luxon'
-import { 
-  uploadMulter, 
-  uploadImagesToCloudinary, 
+const express = require('express')
+const Note = require('../models/Note.js')
+const { authenticateToken, requireUser, requireUserAdmin, requireAuthorizedIp } = require('../middleware/auth.js')
+const { sendEmailWithProvider } = require('../utils/emailSenders.js')
+const EmailProvider = require('../models/EmailProvider.js')
+const { encryptText, decryptText } = require('../utils/encryption.js')
+const { DateTime } = require('luxon')
+const {
+  uploadMulter,
+  uploadImagesToCloudinary,
   uploadVideoToCloudinary,
   uploadVideosToCloudinary,
   uploadPDFsToCloudinary,
-  deleteMediaFromCloudinary, 
-  deleteMediaArrayFromCloudinary, 
-  validateMediaLimits, 
-  extractMediaFromRequest 
-} from '../utils/mediaUpload.js'
+  deleteMediaFromCloudinary,
+  deleteMediaArrayFromCloudinary,
+  validateMediaLimits,
+  extractMediaFromRequest
+} = require('../utils/mediaUpload.js')
 
-import crypto from 'crypto'
+const crypto = require('crypto')
 
 // Helper: replace braced placeholders {PLACEHOLDER}
 function replaceBracedPlaceholders(content, placeholders) {
@@ -615,9 +615,9 @@ router.get('/sent-reminders/list', authenticateToken, requireUser, requireNotepa
 // =====================
 // Any authenticated user can send their own notes
 // If note has a scheduled date, send immediately AND schedule a second send for that date
-router.post('/:id/send', authenticateToken, requireUser, async (req, res) => {
+router.post('/:id/send', authenticateToken, requireUser, requireAuthorizedIp, async (req, res) => {
   try {
-    const { recipientEmails, customMessage, fromName, fromEmail, callToActionText, callLink, replyTo } = req.body
+    const { recipientEmails, customMessage, fromName, fromEmail, callToActionText, callLink, replyTo, clientPublicIP } = req.body
     const noteId = req.params.id
 
     // ============================================================
@@ -1224,7 +1224,7 @@ router.post('/buttons/visibility', authenticateToken, requireUser, async (req, r
     }
 
     // Import send button helper
-    const { getButtonVisibility } = await import('../utils/sendButtonHelper.js').then(m => m.default ? m.default : m)
+    const { getButtonVisibility } = require('../utils/sendButtonHelper.js')
 
     const note = await Note.findById(noteId)
     if (!note) {
@@ -1256,7 +1256,7 @@ router.post('/buttons/visibility', authenticateToken, requireUser, async (req, r
   }
 })
 
-export default router
+module.exports = router
 
 
 

@@ -1,5 +1,5 @@
-import mongoose from 'mongoose'
-import bcrypt from 'bcryptjs'
+const mongoose = require('mongoose')
+const bcrypt = require('bcryptjs')
 
 const globalAdminSchema = new mongoose.Schema({
   email: {
@@ -104,4 +104,4 @@ globalAdminSchema.methods.resetLoginAttempts = function() {
   })
 }
 
-export default mongoose.model('GlobalAdmin', globalAdminSchema)
+module.exports = mongoose.model('GlobalAdmin', globalAdminSchema)

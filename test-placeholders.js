@@ -3,7 +3,7 @@
  * Tests all placeholder generators and replacements
  */
 
-import crypto from 'crypto';
+const crypto = require('crypto');
 
 // =====================
 // PLACEHOLDER VALUE GENERATORS
