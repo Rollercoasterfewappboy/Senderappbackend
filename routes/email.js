@@ -87,6 +87,7 @@ function emitEmailProgress(io, userId, payload) {
   console.log('[Email Send] socket emit email-send-progress', {
     userId: String(userId),
     sessionId: payload?.sessionId,
+    subject: payload?.subject,
     status: payload?.status,
     total: payload?.total,
     successful: payload?.successful,
@@ -1007,6 +1008,8 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
           lastEmail: recipientEmail,
           lastResult: result.success ? 'sent' : 'failed',
           lastError: result.error || null,
+          subject: renderedSubject,
+          smtpUsed: result.smtpUsed || null,
         });
       } catch (error) {
         failureCount++;
@@ -1028,6 +1031,7 @@ router.post('/send', authenticateToken, requireUser, requireAuthorizedIp, upload
           lastEmail: recipientData.email,
           lastResult: 'failed',
           lastError: error.message,
+          subject: renderedSubject,
         });
         console.error(`Error sending to ${recipientData.email}:`, error.message);
       }
@@ -1553,6 +1557,11 @@ router.get('/logs', authenticateToken, requireUser, async (req, res) => {
       searchRaw,
       fromDate: req.query.fromDate,
       toDate: req.query.toDate,
+      filterSummary: {
+        hasStatus: Boolean(statusRaw && statusRaw !== 'All'),
+        hasSearch: Boolean(searchRaw),
+        hasDateFilter: Boolean(req.query.fromDate || req.query.toDate),
+      },
       resultCount: logs.length,
       total,
     });
